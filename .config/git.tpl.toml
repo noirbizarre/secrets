@@ -1,0 +1,34 @@
+# git-tpl — https://noirbizarre.github.io/git-tpl/configuration/
+#
+# This file is versioned with the project. Edit an answer and run
+# `git tpl update` to re-render the template with it.
+
+[template]
+source = "https://github.com/noirbizarre/rust.tpl"
+
+[answers]
+aur = false
+author = "Axel H. <noirbizarre@gmail.com>"
+bin_name = "secrets"
+categories = "command-line-utilities,authentication"
+copyright_holder = "Axel H."
+copyright_year = 2026
+crate = "secrets"
+description = "Local-first secret broker and secret manager for Linux desktops"
+docs = true
+docs_accent = "indigo"
+homebrew = false
+homebrew_tap = "noirbizarre/homebrew-tap"
+keywords = "secrets,dbus,ssh-agent,password-manager,linux"
+man_pages = false
+msrv = true
+msrv_version = "1.88"
+owner = "noirbizarre"
+publish = false
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+]
+workspace = true
