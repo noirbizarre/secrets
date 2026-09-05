@@ -11,7 +11,7 @@
 resolver = "3"
 # Add your member crates here, e.g. members = ["crates/*"]. The template owns
 # the workspace root, not what fills it.
-members = []
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -47,18 +47,6 @@ publish = false
 lto = true
 codegen-units = 1
 strip = true
-
-# --- project-specific --------------------------------------------------------
-#
-# Everything above this line is owned by the template and will keep updating.
-# Everything below is yours.
-#
-# The template seeds what follows once, at `git tpl init`, and then leaves it
-# alone: Dependabot bumps versions here weekly, and a template that propagated
-# its own would open a conflict against every one of those PRs. Resolve in
-# favour of the project if `git tpl update` ever touches it.
-
-[workspace.dependencies]
 # Shared versions for member crates to inherit via `dep = { workspace = true }`.
 # Owned by the project and Dependabot from here, same deal as [dependencies]
 # in the non-workspace shape.

@@ -1,0 +1,46 @@
+# secrets-cli — the `secrets` command-line client.
+#
+# A thin client over D-Bus: it holds no vault or session state of its own,
+# and every secret operation is a method call on secretsd.
+
+[package]
+name = "secrets-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The secrets CLI: a thin D-Bus client over secretsd"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "secrets"
+path = "src/main.rs"
+
+[lib]
+name = "secrets_cli"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive", "env", "wrap_help"] }
+console = "0.16.4"
+demand = "2.1.0"
+miette = { version = "7.6.0", features = ["fancy"] }
+secrets-core = { version = "0.1.0", path = "../secrets-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.20"
+toml = "1.1.4"
+xdg = "3.0.0"
+zbus = "5.19.0"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+tempfile = "3.27.0"

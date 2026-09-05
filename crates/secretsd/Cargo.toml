@@ -1,0 +1,49 @@
+# secretsd — the user-session daemon.
+#
+# Owns the secret store, session/lock state and access control. Exposes
+# org.secrets.Manager and the org.freedesktop.Secret.* compatibility
+# interfaces over the D-Bus session bus, and a standard SSH agent socket.
+
+[package]
+name = "secretsd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The Secrets daemon: secret store, session/lock state and SSH agent"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "secretsd"
+path = "src/main.rs"
+
+[dependencies]
+aes-gcm = "0.11.1"
+argon2 = "0.6.0"
+base64 = "0.23.1"
+miette = { version = "7.6.0", features = ["fancy"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+secrets-core = { version = "0.1.0", path = "../secrets-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+signature = "2"
+ssh-agent-lib = "0.6.0"
+ssh-key = { version = "0.6.7", features = ["rand_core"] }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["rt", "net", "rt-multi-thread", "fs"] }
+toml = "1.1.4"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+xdg = "3.0.0"
+zbus = "5.19.0"
+zeroize = { version = "1.9.0", features = ["derive"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+tempfile = "3.27.0"

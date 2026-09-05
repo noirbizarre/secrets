@@ -1,0 +1,35 @@
+# secrets-core — shared model, URI parsing and backend contract.
+#
+# Consumed by both secretsd and secrets-cli. Nothing here knows a D-Bus
+# service or a terminal exists: this crate is pure domain logic plus the
+# wire-level types both binaries need to agree on.
+
+[package]
+name = "secrets-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Shared secret:// URI parsing, data model and backend contract for the Secrets ecosystem"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[lib]
+name = "secrets_core"
+path = "src/lib.rs"
+
+[dependencies]
+percent-encoding = "2.3.2"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.20"
+zbus = "5.19.0"
+zeroize = { version = "1.9.0", features = ["derive"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
