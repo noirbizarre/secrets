@@ -1,20 +1,18 @@
-# The `test` job is a three-OS matrix and each leg uploads its own report.
-# Without this, Codecov posts the project status as soon as the first reports
-# settle — in practice before Windows, which is ~4x slower than the other two,
-# has uploaded. That compares a partial report against a complete base and
-# reports a coverage drop that did not happen.
+# --- project-specific: Linux only -------------------------------------------
+#
+# rust.tpl's own template runs a three-OS matrix and waits for all three
+# reports (`after_n_builds: 3`) before notifying. This project's `test` job
+# is Linux-only (see the matching comment in .github/workflows/ci.yaml), so
+# only one report is ever uploaded — left at 3, Codecov would wait forever
+# for two reports that will never arrive and never post a status.
 codecov:
   notify:
-    after_n_builds: 3
+    after_n_builds: 1
 
-# Every leg runs on every commit, so a missing report means a broken run,
-# not an untested platform — nothing should be carried forward to hide it.
+# One leg runs on every commit, so a missing report means a broken run, not
+# an untested platform — nothing should be carried forward to hide it.
 flags:
   linux:
-    carryforward: false
-  windows:
-    carryforward: false
-  macos:
     carryforward: false
 
 coverage:

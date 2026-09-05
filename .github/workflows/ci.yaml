@@ -58,16 +58,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # --- project-specific: Linux only -----------------------------------
+        #
+        # rust.tpl's own matrix tests Linux/Windows/macOS unconditionally —
+        # there is currently no template question for "which OSes does this
+        # project actually run on". Secrets is Linux-only by nature (the
+        # D-Bus session bus, systemd user units, XDG paths and the Unix SSH
+        # agent socket have no Windows/macOS equivalent in this codebase —
+        # `secretsd`/`secrets-cli` depend on the `xdg` crate directly), so
+        # Windows and macOS legs would not compile, not merely fail at
+        # runtime. Restored to the template's default the day this project
+        # ever needs to run elsewhere. Consider raising this as a rust.tpl
+        # question (`test_targets`, alongside the existing `targets` release
+        # question) rather than re-diverging silently on every `git tpl
+        # update`.
         os:
           - name: Linux
             runner: ubuntu-latest
             flag: linux
-          - name: Windows
-            runner: windows-latest
-            flag: windows
-          - name: macOS
-            runner: macos-latest
-            flag: macos
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
