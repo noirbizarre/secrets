@@ -8,12 +8,13 @@
 //! by the rest of this module tree; the raw C ABI and every `unsafe`
 //! block live exclusively in [`ffi`].
 //!
-//! Not yet implemented: the actual `Backend`/`BackendSession` types
-//! (pending confirmation that a real message can be constructed — see
-//! the architecture doc's "What remains unknown").
+//! Not yet implemented: the actual `Backend`/`BackendSession` types —
+//! pending a real, end-to-end confirmation via the probe (see
+//! `docs/architecture/1password-integration.md`).
 
 pub mod ffi;
 pub mod ipc;
+pub mod protocol;
 pub mod session;
 
 #[cfg(test)]

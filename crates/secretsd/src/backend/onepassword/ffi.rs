@@ -6,10 +6,15 @@
 //! alongside the user's 1Password Desktop is loaded, if present. Every
 //! `unsafe` block in the `onepassword` backend lives in this one file;
 //! nothing outside it touches a raw function pointer or a native
-//! allocation. See `docs/architecture/1password-integration.md` for how
-//! the signatures below were reconstructed (via disassembly — no
-//! documentation for this protocol exists anywhere public) and for the
-//! parts still flagged there as not fully confirmed.
+//! allocation. The signatures below are **confirmed**, not guessed: they
+//! match 1Password's own official, MIT-licensed Go SDK's Unix cgo
+//! bindings (`internal/shared_lib_core.go` in
+//! `github.com/1Password/onepassword-sdk-go`), which call the exact same
+//! two exported symbols against the exact same library. See
+//! `docs/architecture/1password-integration.md` for the full citation
+//! and history (an earlier disassembly-based guess in this file had the
+//! output parameter shapes wrong — corrected here against that
+//! authoritative source before ever calling the real library for real).
 //!
 //! `#[allow(dead_code)]` below is deliberate: nothing outside this
 //! module's own tests calls `IpcLibrary` yet — the `ipc` module (Step 6)
@@ -43,27 +48,27 @@ const SEND_MESSAGE_SYMBOL: &[u8] = b"op_sdk_ipc_send_message\0";
 /// The exported `op_sdk_ipc_free_response` symbol's name, null-terminated.
 const FREE_RESPONSE_SYMBOL: &[u8] = b"op_sdk_ipc_free_response\0";
 
-/// Raw C signature of `op_sdk_ipc_send_message`, reconstructed via
-/// disassembly (see the architecture doc's "`op_sdk_ipc_send_message`'s
-/// signature and behavior" section): copies `request_len` bytes from
-/// `request_ptr`, and on success (return `0`) writes the native
-/// response's length, capacity and data pointer into `out_len`,
-/// `out_cap`, `out_ptr` respectively. A negative `request_len` or any
-/// null output pointer is rejected by the native code itself before this
-/// module's own checks ever run.
+/// Raw C signature of `op_sdk_ipc_send_message`, confirmed against
+/// 1Password's own Go SDK (see the module doc): copies `request_len`
+/// bytes from `request_ptr`, and on success (return `0`) writes the
+/// native response's data pointer, length and capacity into `out_buf`,
+/// `out_len`, `out_cap` respectively — in that order, and `out_buf` is a
+/// pointer *to* the data pointer (`uint8_t**` in the Go SDK's own cgo
+/// declaration), not the pointer value packed into a `usize` as an
+/// earlier, disassembly-based version of this file assumed.
 type RawSendMessage = unsafe extern "C" fn(
     request_ptr: *const u8,
-    request_len: isize,
+    request_len: usize,
+    out_buf: *mut *mut u8,
     out_len: *mut usize,
     out_cap: *mut usize,
-    out_ptr: *mut usize,
 ) -> i32;
 
-/// Raw C signature of `op_sdk_ipc_free_response`. The middle parameter is
-/// read by the native code but not used by it (see the architecture
-/// doc); passed through anyway so a future library version that starts
-/// using it still gets a value consistent with `out_cap` above.
-type RawFreeResponse = unsafe extern "C" fn(ptr: *mut u8, unused: usize, len: usize);
+/// Raw C signature of `op_sdk_ipc_free_response`, confirmed against
+/// 1Password's own Go SDK: all three parameters are used (an earlier,
+/// disassembly-based version of this file assumed the middle one was
+/// ignored) — the same `(buf, len, cap)` triple `send_message` wrote out.
+type RawFreeResponse = unsafe extern "C" fn(buf: *mut u8, len: usize, cap: usize);
 
 /// Everything that can go wrong loading the library or resolving its
 /// symbols. Never a panic: 1Password Desktop may simply not be
@@ -199,30 +204,32 @@ impl IpcLibrary {
     ///
     /// See [`RawIpcError`].
     pub fn send_message_raw(&self, request: &[u8]) -> Result<Vec<u8>, RawIpcError> {
+        let mut out_buf: *mut u8 = std::ptr::null_mut();
         let mut out_len: usize = 0;
         let mut out_cap: usize = 0;
-        let mut out_ptr: usize = 0;
 
         // SAFETY: `self.send_message` was resolved from the dynamic
         // symbol table at construction time and is called with exactly
-        // the argument shapes `RawSendMessage` declares; `request`'s
-        // pointer/length describe a valid, live `&[u8]` for the
-        // duration of this call, and the three `out_*` locals are valid,
-        // aligned, exclusively-borrowed slots for exactly that duration.
+        // the argument shapes `RawSendMessage` declares (confirmed
+        // against 1Password's own Go SDK — see the module doc);
+        // `request`'s pointer/length describe a valid, live `&[u8]` for
+        // the duration of this call, and the three `out_*` locals are
+        // valid, aligned, exclusively-borrowed slots for exactly that
+        // duration.
         let status = unsafe {
             (self.send_message)(
                 request.as_ptr(),
-                request.len() as isize,
+                request.len(),
+                std::ptr::addr_of_mut!(out_buf),
                 std::ptr::addr_of_mut!(out_len),
                 std::ptr::addr_of_mut!(out_cap),
-                std::ptr::addr_of_mut!(out_ptr),
             )
         };
 
         if status != 0 {
             return Err(RawIpcError::Native(status));
         }
-        if out_ptr == 0 || out_len > out_cap {
+        if out_buf.is_null() || out_len > out_cap {
             // A null data pointer or a length exceeding its own reported
             // capacity can never be a genuine successful response —
             // reject before ever forming a slice from it.
@@ -234,7 +241,7 @@ impl IpcLibrary {
         // panicking, which it should not barring OOM) — see its `Drop`.
         let guard = NativeResponseGuard {
             library: self,
-            ptr: out_ptr as *mut u8,
+            ptr: out_buf,
             cap: out_cap,
             len: out_len,
         };
@@ -263,11 +270,15 @@ struct NativeResponseGuard<'a> {
 
 impl Drop for NativeResponseGuard<'_> {
     fn drop(&mut self) {
-        // SAFETY: `ptr`/`cap`/`len` came directly from the successful
+        // SAFETY: `ptr`/`len`/`cap` came directly from the successful
         // `send_message` call that constructed this guard, describe a
         // buffer the native library allocated, and have not been freed
         // yet — this is the one and only place that happens for them.
-        unsafe { (self.library.free_response)(self.ptr, self.cap, self.len) }
+        // Argument order is `(buf, len, cap)`, confirmed against
+        // 1Password's own Go SDK (see the module doc) — not `(buf, cap,
+        // len)` as an earlier, disassembly-based version of this file
+        // assumed.
+        unsafe { (self.library.free_response)(self.ptr, self.len, self.cap) }
     }
 }
 
@@ -285,22 +296,20 @@ mod tests {
 #include <stdlib.h>
 #include <string.h>
 
-int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
-                             size_t *out_len, size_t *out_cap, size_t *out_ptr) {
-    if (req_len < 0) { return -1; }
-    size_t len = (size_t)req_len;
-    uint8_t *buf = (uint8_t *)malloc(len > 0 ? len : 1);
-    if (len > 0) { memcpy(buf, req_ptr, len); }
-    *out_len = len;
-    *out_cap = len;
-    *out_ptr = (size_t)(uintptr_t)buf;
+int op_sdk_ipc_send_message(const uint8_t *req_ptr, size_t req_len,
+                             uint8_t **out_buf, size_t *out_len, size_t *out_cap) {
+    uint8_t *buf = (uint8_t *)malloc(req_len > 0 ? req_len : 1);
+    if (req_len > 0) { memcpy(buf, req_ptr, req_len); }
+    *out_buf = buf;
+    *out_len = req_len;
+    *out_cap = req_len;
     return 0;
 }
 
-void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
-    (void)unused;
+void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
     (void)len;
-    free(ptr);
+    (void)cap;
+    free(buf);
 }
 "#;
 
@@ -310,9 +319,9 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
 #include <stdint.h>
 #include <stddef.h>
 
-int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
-                             size_t *out_len, size_t *out_cap, size_t *out_ptr) {
-    (void)req_ptr; (void)req_len; (void)out_len; (void)out_cap; (void)out_ptr;
+int op_sdk_ipc_send_message(const uint8_t *req_ptr, size_t req_len,
+                             uint8_t **out_buf, size_t *out_len, size_t *out_cap) {
+    (void)req_ptr; (void)req_len; (void)out_buf; (void)out_len; (void)out_cap;
     return -1;
 }
 "#;

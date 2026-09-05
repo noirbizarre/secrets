@@ -190,22 +190,20 @@ mod tests {
 #include <stdlib.h>
 #include <string.h>
 
-int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
-                             size_t *out_len, size_t *out_cap, size_t *out_ptr) {
-    if (req_len < 0) { return -1; }
-    size_t len = (size_t)req_len;
-    uint8_t *buf = (uint8_t *)malloc(len > 0 ? len : 1);
-    if (len > 0) { memcpy(buf, req_ptr, len); }
-    *out_len = len;
-    *out_cap = len;
-    *out_ptr = (size_t)(uintptr_t)buf;
+int op_sdk_ipc_send_message(const uint8_t *req_ptr, size_t req_len,
+                             uint8_t **out_buf, size_t *out_len, size_t *out_cap) {
+    uint8_t *buf = (uint8_t *)malloc(req_len > 0 ? req_len : 1);
+    if (req_len > 0) { memcpy(buf, req_ptr, req_len); }
+    *out_buf = buf;
+    *out_len = req_len;
+    *out_cap = req_len;
     return 0;
 }
 
-void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
-    (void)unused;
+void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
     (void)len;
-    free(ptr);
+    (void)cap;
+    free(buf);
 }
 "#;
 
@@ -216,17 +214,17 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
 #include <stdint.h>
 #include <stddef.h>
 
-int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
-                             size_t *out_len, size_t *out_cap, size_t *out_ptr) {
+int op_sdk_ipc_send_message(const uint8_t *req_ptr, size_t req_len,
+                             uint8_t **out_buf, size_t *out_len, size_t *out_cap) {
     (void)req_ptr; (void)req_len;
     *out_len = 1;
     *out_cap = 0; /* len > cap: self-inconsistent */
-    *out_ptr = 0;
+    *out_buf = NULL;
     return 0;
 }
 
-void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
-    (void)ptr; (void)unused; (void)len;
+void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
+    (void)buf; (void)len; (void)cap;
 }
 "#;
 
@@ -237,14 +235,14 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
 #include <stdint.h>
 #include <stddef.h>
 
-int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
-                             size_t *out_len, size_t *out_cap, size_t *out_ptr) {
-    (void)req_ptr; (void)req_len; (void)out_len; (void)out_cap; (void)out_ptr;
+int op_sdk_ipc_send_message(const uint8_t *req_ptr, size_t req_len,
+                             uint8_t **out_buf, size_t *out_len, size_t *out_cap) {
+    (void)req_ptr; (void)req_len; (void)out_buf; (void)out_len; (void)out_cap;
     return 7;
 }
 
-void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
-    (void)ptr; (void)unused; (void)len;
+void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
+    (void)buf; (void)len; (void)cap;
 }
 "#;
 
@@ -256,15 +254,15 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
 #include <stddef.h>
 #include <unistd.h>
 
-int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
-                             size_t *out_len, size_t *out_cap, size_t *out_ptr) {
-    (void)req_ptr; (void)req_len; (void)out_len; (void)out_cap; (void)out_ptr;
+int op_sdk_ipc_send_message(const uint8_t *req_ptr, size_t req_len,
+                             uint8_t **out_buf, size_t *out_len, size_t *out_cap) {
+    (void)req_ptr; (void)req_len; (void)out_buf; (void)out_len; (void)out_cap;
     sleep(10);
     return -1;
 }
 
-void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
-    (void)ptr; (void)unused; (void)len;
+void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
+    (void)buf; (void)len; (void)cap;
 }
 "#;
 

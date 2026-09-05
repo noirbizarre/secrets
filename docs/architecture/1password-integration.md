@@ -6,6 +6,19 @@ below). This is a working document for a compatibility-sensitive adapter,
 not a stable protocol specification — see "Compatibility risk" at the
 end.
 
+> **Update, same investigation session:** the sections below up to
+> "Version compatibility" record the *first* pass, reconstructed purely
+> from disassembly, and originally concluded the message schema was
+> unrecoverable in one session. It was found shortly after, in the same
+> session: 1Password publishes an official, MIT-licensed Go SDK
+> (`github.com/1Password/onepassword-sdk-go`) whose Unix cgo bindings
+> call the exact same two exported symbols, against the exact same
+> library, to talk to the exact same Desktop integration this document
+> is about. See "Confirmed wire protocol" below for the corrected,
+> citation-backed account — it **supersedes** the FFI signature and "What
+> remains unknown" sections that follow, which are kept only as a record
+> of what disassembly alone could and could not establish.
+
 ## Chosen architecture
 
 ```text
@@ -15,7 +28,7 @@ secretsd
 OnePasswordBackend        (crates/secretsd/src/backend/onepassword/, ADR-0008/0011)
    |
    v
-secretsd's own IPC client   (crates/secretsd/src/backend/onepassword/{ffi,ipc,session}.rs)
+secretsd's own IPC client   (crates/secretsd/src/backend/onepassword/{ffi,ipc,protocol,session}.rs)
    |
    v
 libop_sdk_ipc_client.so    (dynamically loaded, never bundled — Step 5)
@@ -104,6 +117,14 @@ surface).
 
 ### `op_sdk_ipc_send_message`'s signature and behavior (via disassembly)
 
+> **Superseded by "Confirmed wire protocol" below.** Disassembly got the
+> argument *count* and general shape right, but guessed the output
+> parameter layout wrong: the real 3rd parameter is `uint8_t**` (a
+> pointer to the data pointer), not a `usize` the pointer value is packed
+> into, and the real parameter order is `(out_buf, out_len, out_cap)`,
+> not `(out_len, out_cap, out_ptr)`. Kept below verbatim as a record of
+> what disassembly alone produced, not as guidance to implement against.
+
 `objdump -d --disassemble=op_sdk_ipc_send_message`, cross-referenced
 against `readelf -r` to resolve its internal (non-exported, but
 unstripped) callees by name, shows:
@@ -141,6 +162,11 @@ unstripped) callees by name, shows:
 
 ### `op_sdk_ipc_free_response`'s behavior
 
+> **Superseded by "Confirmed wire protocol" below.** The real signature
+> is `(buf, len, cap)` and all three are meaningful — disassembly's
+> "middle argument is ignored" reading was a misattribution of which
+> register held which of the three words, not a real dead parameter.
+
 Three arguments `(ptr, _unused, len)`; the middle argument is read into a
 register but never tested or used. If `ptr` and `len` are both non-null/
 non-zero, it calls `___rust_dealloc(ptr, size = len, align = 1)`. Two
@@ -170,22 +196,19 @@ per-chunk header/sequence metadata; if such metadata exists, it is added
 by `send_to` when actually writing each chunk to the socket, which this
 investigation did not trace further.
 
-## What remains unknown
+## What the first disassembly-only pass left unknown
 
-The single load-bearing unknown: **the message body's own wire format**
-— what bytes must be inside the `Vec<u8>` passed to `send_to` for
-1Password Desktop's IPC handler to accept it as a legitimate "initialize
-a client" or "invoke an operation" request. Nothing recovered above
-reveals this; it is a schema question (JSON? a length-delimited
-multi-chunk envelope on top of raw bytes? bincode? protobuf?), not a
-transport/FFI question, and the transport/FFI layer is as far as this
-session's disassembly reached.
+The single load-bearing unknown at that point: **the message body's own
+wire format** — what bytes must be inside the `Vec<u8>` passed to
+`send_to` for 1Password Desktop's IPC handler to accept it as a
+legitimate "initialize a client" or "invoke an operation" request.
+Nothing recovered by disassembly alone revealed this.
 
 Five ad hoc probes were sent directly to the live socket to test cheap
 framing hypotheses (bare JSON, 4-byte big-endian and little-endian
-length-prefixed JSON, an empty write, and garbage bytes). None of the
-raw bytes sent or received were persisted anywhere (including here) —
-only the structural outcome:
+length-prefixed JSON, an empty write, and garbage bytes) before the Go
+SDK was found. None of the raw bytes sent or received were persisted
+anywhere (including here) — only the structural outcome:
 
 | Hypothesis                          | Outcome                              |
 | ------------------------------------ | ------------------------------------- |
@@ -195,14 +218,134 @@ only the structural outcome:
 | Empty write (0 bytes)                | No response; connection stayed open   |
 | A few garbage bytes                  | Connection closed immediately (EOF)   |
 
-This is inconclusive — it contradicts a naive "it's just length-prefixed
-JSON" theory more than it confirms one, and is not enough signal to
-reconstruct a confident wire format. Recovering it with real confidence
-would need decompiling `send_to`'s and `build_chunks`'s bodies in full
-(their internal message-construction logic, not just their entry
-signatures), which is a materially larger effort than this session's
-time-box — realistically several further dedicated sessions, not "a few
-more hours".
+Inconclusive on its own — it turns out the framing guessed at here
+(bare JSON, no length prefix) was directionally correct, but the *outer
+envelope* (see below) needed to be present for the server to respond
+usefully; a bare `{}` is not a valid envelope, hence no response.
+
+## Confirmed wire protocol (via 1Password's official Go SDK)
+
+1Password publishes an official, MIT-licensed Go SDK,
+[`github.com/1Password/onepassword-sdk-go`](https://github.com/1Password/onepassword-sdk-go),
+supporting exactly this scenario — its README documents `WithDesktopAppIntegration`
+as a first-class authentication mode. Its Unix build
+(`internal/shared_lib_core.go`, `//go:build cgo && (darwin || linux)`)
+loads `libop_sdk_ipc_client.so`/`.dylib` and calls the exact same two
+exported symbols this project uses, with a C signature stated directly
+in its own cgo comment block. This is the authoritative source for
+everything below — quoted/paraphrased from that file and
+`internal/core.go`/`secrets.go` in the same repository, not re-guessed.
+
+### The real FFI signature
+
+```c
+typedef int32_t (*send_message_t)(
+    const uint8_t* msg_ptr,
+    size_t msg_len,
+    uint8_t** out_buf,
+    size_t* out_len,
+    size_t* out_cap
+);
+typedef void (*free_message_t)(
+    uint8_t* buf,
+    size_t len,
+    size_t cap
+);
+```
+
+Corrections versus the disassembly-only pass above: `msg_len` is
+unsigned (`size_t`), not signed; the 3rd `send_message` parameter is a
+pointer *to* the data pointer (`uint8_t**`), not a `usize` the pointer
+value is packed into; the parameter order is `(out_buf, out_len,
+out_cap)`; and `free_response` uses all three of `(buf, len, cap)`, not
+two. `crates/secretsd/src/backend/onepassword/ffi.rs` was corrected to
+match this exactly before ever calling the real library for real (see
+its own module doc for the corrected types).
+
+### The message envelope
+
+Every message is one JSON object (`internal.Request`/`Response` in
+`shared_lib_core.go`/`core.go`):
+
+```jsonc
+// Sent to op_sdk_ipc_send_message:
+{
+  "kind": "init_client" | "invoke" | "release_client",
+  "account_name": "<1Password account name or account UUID>",
+  "payload": "<base64 of an inner, kind-specific JSON payload>"
+}
+// Returned from it:
+{ "success": true | false, "payload": "<base64>" }
+```
+
+`account_name` is required by the protocol itself (not an implementation
+choice): the 1Password account name or account UUID as shown top-left in
+the Desktop app's sidebar. On failure, the decoded `payload` is a plain
+UTF-8 error message, not further JSON.
+
+**`init_client`'s inner payload** (`internal.ClientConfig`):
+
+```json
+{
+  "serviceAccountToken": "",
+  "programmingLanguage": "Go",
+  "sdkVersion": "...",
+  "integrationName": "...",
+  "integrationVersion": "...",
+  "requestLibraryName": "net/http",
+  "requestLibraryVersion": "...",
+  "os": "linux",
+  "osVersion": "0.0.0",
+  "architecture": "amd64",
+  "account_name": "<same account name/UUID as the outer envelope>"
+}
+```
+
+Note `account_name` is the one field that is *not* camelCase, unlike
+every sibling field — confirmed by reading the actual Go struct tags,
+not assumed from the pattern. A successful response's decoded payload is
+bare JSON for a `uint64` client ID (e.g. `42`), to be passed as
+`clientId` in every subsequent `invoke` call for this client.
+
+**`invoke`'s inner payload** (`internal.InvokeConfig`):
+
+```json
+{
+  "invocation": {
+    "clientId": 42,
+    "parameters": {
+      "name": "SecretsResolve",
+      "parameters": { "secret_reference": "op://vault/item/field" }
+    }
+  }
+}
+```
+
+`MethodName`/`SerializedParams` field names are `"name"`/`"parameters"`
+(`internal.Parameters`), not the Go-side names. `secrets.go` confirms
+`"SecretsResolve"` as the exact method name for resolving one `op://...`
+reference, with `{"secret_reference": "..."}` as its only parameter. A
+successful response's decoded payload is a JSON string (the resolved
+value, quoted).
+
+### Required prerequisite
+
+1Password Desktop's own error strings, embedded in the Go SDK
+(`errChannelClosed`/`errConnectionDropped` in `internal/core.go`), state
+the channel stays closed unless **Settings → Developer → "Integrate with
+other apps"** (or "Integrate with the 1Password SDKs") is enabled in the
+Desktop app — a real, user-facing gate, not something request bytes can
+route around.
+
+### `crates/secretsd/src/backend/onepassword/protocol.rs`
+
+Implements the envelope/payload construction and response parsing above,
+verified by unit tests that assert on the exact JSON field names (a
+typo here would silently build a request 1Password Desktop's own
+deserializer rejects, with no useful diagnostic). Kept as its own module,
+separate from `ipc.rs`'s deliberately protocol-agnostic `Request`/
+`Response`, so the byte-level IPC primitive still does not need to know
+what a legitimate message looks like — only `protocol.rs` does.
 
 ## Version compatibility
 
@@ -220,19 +363,23 @@ how this project already documents this class of caveat elsewhere.
 
 ## Compatibility risk
 
-This confirms the task's own framing exactly: this is a
-**compatibility-sensitive adapter, not a stable protocol**. The FFI
-envelope (Step 5/6's concern) is now reasonably well understood; the
-message schema (Step 6/7's concern, specifically what bytes actually
-constitute a valid "init" or "invoke" request) is not, and closing that
-gap is the critical risk carried into Step 8/9. Calling
-`op_sdk_ipc_send_message` for real against a user's live, running
-1Password Desktop with a *guessed* request body is not equivalent in
-risk to calling it with a confirmed one: worst case, a malformed request
-is simply rejected by 1Password Desktop's own input validation (the
-`Err` path already observed above exists precisely for that); there is
-no evidence from this investigation of a crash risk to Desktop itself,
-but confidence here is bounded by what one session's disassembly can
-establish. Step 8 revisits this explicitly before performing a real,
-one-time invocation.
+This still confirms the task's own framing: this is a
+**compatibility-sensitive adapter, not a stable protocol** — 1Password's
+Go SDK's own envelope/`ClientConfig`/`InvokeConfig` shapes are
+implementation details of an "SDKs are in active development... version
+0... possibility of breaking changes" project (the Go SDK's own README),
+not a versioned wire contract either project commits to forever. This
+project depends on it anyway, because it is the only source — official
+or otherwise — that documents this Desktop-local channel at all; treat
+every field name and the FFI signature above as due for re-verification
+against whatever 1Password Desktop / SDK version is actually installed
+when this stops working, not a fact to hard-code and forget.
+
+With the message schema now confirmed rather than guessed, Step 8's real
+invocation risk is substantially lower than it was when this document
+first concluded the schema was unrecoverable: a malformed request is
+still just rejected by 1Password Desktop's own input validation (the
+`Err` path already observed above exists precisely for that), and there
+is no evidence from this investigation of a crash risk to Desktop
+itself. Step 8 proceeds using the confirmed protocol.
 </content>
