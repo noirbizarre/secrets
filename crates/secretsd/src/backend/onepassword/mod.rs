@@ -13,3 +13,7 @@
 //! the architecture doc's "What remains unknown").
 
 pub mod ffi;
+pub mod ipc;
+
+#[cfg(test)]
+pub(crate) mod test_support;

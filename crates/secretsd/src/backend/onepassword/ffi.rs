@@ -145,10 +145,11 @@ impl IpcLibrary {
     }
 
     /// Load and resolve symbols from exactly the given path, with no
-    /// candidate fallback. Kept private to this module: production code
-    /// only ever wants [`IpcLibrary::load`]'s discovery behavior; this is
-    /// the seam this module's own tests use to point at a fixture.
-    fn try_load(path: &Path) -> Result<Self, LoadError> {
+    /// candidate fallback. `pub(crate)`, not `pub`: production code only
+    /// ever wants [`IpcLibrary::load`]'s discovery behavior; this is the
+    /// seam this module's own tests, and the `ipc`/`session` test
+    /// suites, use to point at a fixture library instead.
+    pub(crate) fn try_load(path: &Path) -> Result<Self, LoadError> {
         // SAFETY: loading a dynamic library runs its own constructors,
         // the same trust boundary as any other dynamically linked
         // dependency this process loads — unavoidable for a plugin-
@@ -272,35 +273,18 @@ impl Drop for NativeResponseGuard<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
+    use crate::backend::onepassword::test_support::compile_fixture;
 
-    /// Compiles a tiny fixture C shared library at test time (via the
-    /// system `cc`, never committed as a binary) so these tests can
-    /// exercise real `dlopen`/`dlsym` behavior without needing 1Password
-    /// Desktop installed. `symbols` controls which of the two required
-    /// exports the fixture actually provides, to exercise
-    /// [`LoadError::SymbolNotFound`].
-    ///
-    /// Returns `None` (skipping the test, not failing it) if no C
-    /// compiler is available at all — everywhere this project's CI runs
-    /// has one, but a developer machine stripped of `cc` should not see
-    /// a false failure unrelated to this module's own logic.
-    fn compile_fixture(dir: &Path, symbols: &[&str]) -> Option<PathBuf> {
-        if std::process::Command::new("cc")
-            .arg("--version")
-            .output()
-            .is_err()
-        {
-            return None;
-        }
+    /// A fixture that echoes its input back: allocates a same-size
+    /// buffer, copies the request into it, and reports its true
+    /// `(len, cap)` — a legitimate, self-consistent response by this
+    /// module's own definition of one.
+    const ECHO_FIXTURE: &str = r#"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
-        let mut source =
-            String::from("#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n");
-        if symbols.contains(&"send_message") {
-            source.push_str(
-                r#"
 int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
                              size_t *out_len, size_t *out_cap, size_t *out_ptr) {
     if (req_len < 0) { return -1; }
@@ -312,37 +296,26 @@ int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
     *out_ptr = (size_t)(uintptr_t)buf;
     return 0;
 }
-"#,
-            );
-        }
-        if symbols.contains(&"free_response") {
-            source.push_str(
-                r#"
+
 void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
     (void)unused;
     (void)len;
     free(ptr);
 }
-"#,
-            );
-        }
+"#;
 
-        let source_path = dir.join("fixture.c");
-        std::fs::write(&source_path, source).unwrap();
-        let library_path = dir.join("libfixture.so");
-        let output = std::process::Command::new("cc")
-            .args(["-shared", "-fPIC", "-o"])
-            .arg(&library_path)
-            .arg(&source_path)
-            .output()
-            .expect("cc is available (checked above)");
-        assert!(
-            output.status.success(),
-            "fixture compilation failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        Some(library_path)
-    }
+    /// A fixture exporting only `op_sdk_ipc_send_message`, to exercise
+    /// [`LoadError::SymbolNotFound`] for the other required symbol.
+    const SEND_MESSAGE_ONLY_FIXTURE: &str = r#"
+#include <stdint.h>
+#include <stddef.h>
+
+int op_sdk_ipc_send_message(const uint8_t *req_ptr, intptr_t req_len,
+                             size_t *out_len, size_t *out_cap, size_t *out_ptr) {
+    (void)req_ptr; (void)req_len; (void)out_len; (void)out_cap; (void)out_ptr;
+    return -1;
+}
+"#;
 
     #[test]
     fn loading_a_missing_library_reports_not_found_without_panicking() {
@@ -354,7 +327,7 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
     #[test]
     fn a_library_missing_a_required_symbol_reports_which_one() {
         let dir = tempfile::tempdir().unwrap();
-        let Some(path) = compile_fixture(dir.path(), &["send_message"]) else {
+        let Some(path) = compile_fixture(dir.path(), SEND_MESSAGE_ONLY_FIXTURE) else {
             eprintln!("skipping: no C compiler available");
             return;
         };
@@ -371,7 +344,7 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
     #[test]
     fn a_complete_fixture_library_loads_and_round_trips_a_message() {
         let dir = tempfile::tempdir().unwrap();
-        let Some(path) = compile_fixture(dir.path(), &["send_message", "free_response"]) else {
+        let Some(path) = compile_fixture(dir.path(), ECHO_FIXTURE) else {
             eprintln!("skipping: no C compiler available");
             return;
         };
@@ -384,7 +357,7 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
     #[test]
     fn an_empty_message_round_trips_to_an_empty_response() {
         let dir = tempfile::tempdir().unwrap();
-        let Some(path) = compile_fixture(dir.path(), &["send_message", "free_response"]) else {
+        let Some(path) = compile_fixture(dir.path(), ECHO_FIXTURE) else {
             eprintln!("skipping: no C compiler available");
             return;
         };
@@ -397,7 +370,7 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
     #[test]
     fn repeated_calls_free_each_native_response_without_leaking_or_crashing() {
         let dir = tempfile::tempdir().unwrap();
-        let Some(path) = compile_fixture(dir.path(), &["send_message", "free_response"]) else {
+        let Some(path) = compile_fixture(dir.path(), ECHO_FIXTURE) else {
             eprintln!("skipping: no C compiler available");
             return;
         };
@@ -416,7 +389,7 @@ void op_sdk_ipc_free_response(uint8_t *ptr, size_t unused, size_t len) {
     #[test]
     fn load_honors_the_override_env_var() {
         let dir = tempfile::tempdir().unwrap();
-        let Some(path) = compile_fixture(dir.path(), &["send_message", "free_response"]) else {
+        let Some(path) = compile_fixture(dir.path(), ECHO_FIXTURE) else {
             eprintln!("skipping: no C compiler available");
             return;
         };
