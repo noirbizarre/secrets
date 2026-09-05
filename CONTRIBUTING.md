@@ -106,3 +106,13 @@ Files carrying template-owned content — `mise.toml`, `prek.toml`, `Cargo.toml`
 end with a `# --- project-specific ---` marker. Add below it; Git's 3-way merge
 then preserves your additions across updates. A fix that belongs to every
 project belongs in the template, not here.
+
+## Reporting a security issue
+
+Secrets handles secret material, so a vulnerability here is not an ordinary
+bug. Please do not open a public issue for one. Instead, use GitHub's
+[private vulnerability reporting](https://github.com/noirbizarre/secrets/security/advisories/new)
+for this repository. Include what you'd include in any bug report —
+reproduction steps, affected version — plus your assessment of impact. See
+[`docs/security.md`](docs/security.md) for the MVP's current security model
+and known limitations, which may already cover what you found.

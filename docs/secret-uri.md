@@ -1,0 +1,91 @@
+# The `secret://` URI scheme
+
+`secret://` is the canonical way to name one field of one item in one
+vault, wherever a client needs to refer to a specific secret: CLI
+arguments, `org.secrets.Manager` method parameters, and eventually
+templates and injected environment variables.
+
+**`secret://` is a resource reference, not an IPC protocol.** Resolving one
+happens over D-Bus (see [`docs/dbus/secrets-manager.md`](dbus/secrets-manager.md));
+the URI itself says nothing about transport. See
+[ADR-001](adr/001-dbus-as-the-ipc-mechanism.md) and
+[ADR-002](adr/002-secret-uri-scheme.md) for the reasoning behind keeping
+those two concerns apart.
+
+## Shape
+
+```text
+secret://<vault>/<item...>/<field>
+```
+
+- **`<vault>`** — one segment, the vault's name.
+- **`<item...>`** — one or more segments. Most items are a single segment
+  (`GitHub`); a vault that organises items in folders uses more
+  (`Production/database`). The model does not distinguish "folder" from
+  "item" — it is simply a path.
+- **`<field>`** — one segment, always the *last* one. The field's kind
+  (password, username, TOTP seed, SSH key, certificate, ...) is metadata
+  the backend reports, not part of the URI.
+
+## Examples
+
+```text
+secret://Personal/GitHub/username
+secret://Personal/GitHub/password
+secret://Personal/GitHub/totp
+
+secret://Infrastructure/Production/database/password
+secret://Infrastructure/Production/ssh-key
+
+secret://PKI/example.com/certificate
+secret://PKI/example.com/private-key
+secret://PKI/example.com/chain
+```
+
+`secret://Infrastructure/Production/database/password` parses as vault
+`Infrastructure`, item `Production/database` (two segments), field
+`password`. `secret://Infrastructure/Production/ssh-key` parses as vault
+`Infrastructure`, item `Production` (one segment), field `ssh-key` — the
+same grammar handles both without a separate syntax for nested versus flat
+items; the rule is simply "the last segment is the field, everything
+between the vault and it is the item path."
+
+## Escaping
+
+A literal `/`, `%`, or non-ASCII byte inside a single segment's *name*
+must be percent-encoded (RFC 3986 `pct-encoded`) by whatever produces the
+reference. Parsing splits the string on unescaped `/` characters first,
+then percent-decodes each resulting segment — so an encoded slash
+(`%2F`) can never be mistaken for a path separator, and a segment
+containing one round-trips correctly:
+
+```text
+secret://Personal/My%2FFolder/password
+```
+
+parses as vault `Personal`, item `My/Folder` (one segment, containing a
+literal slash), field `password`.
+
+## Invalid references
+
+The parser (`secrets_core::uri::SecretUri::parse`) rejects, with a specific
+error rather than a generic failure:
+
+- a string not starting with `secret://` (case-sensitive)
+- fewer than three `/`-separated components after the scheme (missing
+  item or field)
+- any component that decodes to the empty string (e.g. a trailing slash,
+  or two adjacent slashes)
+- invalid percent-encoding within a component
+
+Every error variant is listed in `secrets_core::uri::UriError`, and is
+safe to log or display: a malformed reference cannot itself be a secret's
+*value*, only its name.
+
+## Implementation
+
+Parsing, validation and canonical formatting all live in
+`crates/secrets-core/src/uri.rs`, reused by `secretsd` and `secrets-cli`
+(and, eventually, `secrets-gtk`/`secrets-browser`) rather than
+reimplemented per client. See its module documentation and test suite for
+the exhaustive set of cases covered.

@@ -21,6 +21,17 @@ Copyright &copy; 2026 Axel H. — MIT licensed
 # meaningfully conflict with additions here.
 nav = [
   { "Home" = "index.md" },
+  { "Architecture" = [
+    { "Overview" = "architecture/overview.md" },
+    { "Future clients" = "architecture/clients.md" },
+  ] },
+  { "secret:// URI scheme" = "secret-uri.md" },
+  { "D-Bus API" = [
+    { "org.secrets.Manager" = "dbus/secrets-manager.md" },
+    { "Secret Service compatibility" = "dbus/secret-service.md" },
+    { "SSH agent" = "dbus/ssh-agent.md" },
+  ] },
+  { "Security model" = "security.md" },
   { "About" = [
     { "Architecture Decisions" = "adr/README.md" },
   ] },

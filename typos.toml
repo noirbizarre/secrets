@@ -8,6 +8,9 @@ extend-exclude = [
   "tests/snapshots/**",
   # Documentation build output.
   "site/**",
+  # Pre-existing branding asset, not project prose — typos flags its own
+  # filename.
+  "logo.inpiration.png",
 ]
 
 [default.extend-words]
