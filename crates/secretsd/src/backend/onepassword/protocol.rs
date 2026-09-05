@@ -110,6 +110,23 @@ pub enum ProtocolError {
     UnexpectedPayloadShape,
 }
 
+/// The `sdkVersion` field's confirmed-required format: **not** a semver
+/// string. Found by `strace`-comparing this project's raw request bytes
+/// against the real, official Go SDK's own raw request bytes on the same
+/// socket — the Go SDK sends its `//go:embed release/version-build`
+/// value verbatim, a 7-digit build-number encoding, not `"v0.4.1"` or
+/// similar. 1Password Desktop's server-side session delegation rejects
+/// (with an opaque `HttpStatus(400)`, no field-specific error) any
+/// `sdkVersion` that is not a value it recognizes — a semver-looking
+/// placeholder string is enough to trigger that rejection on its own,
+/// independent of every other field. This exact string is the Go SDK
+/// v0.4.1 release's build number, confirmed working against a real
+/// account; it is not this project's own version and will need
+/// re-confirming (the same way, against whatever the current official
+/// SDK sends) if 1Password's accepted-version set ever changes. See
+/// `docs/architecture/1password-poc-results.md` for the full finding.
+const CONFIRMED_SDK_VERSION: &str = "0040102";
+
 /// Build an `init_client` request.
 ///
 /// `account_name` is the 1Password account name (or account UUID) as
@@ -124,7 +141,7 @@ pub fn init_client_request(
     let config = ClientConfig {
         service_account_token: String::new(),
         programming_language: "Rust".to_string(),
-        sdk_version: env!("CARGO_PKG_VERSION").to_string(),
+        sdk_version: CONFIRMED_SDK_VERSION.to_string(),
         integration_name: integration_name.to_string(),
         integration_version: integration_version.to_string(),
         request_library_name: "secretsd".to_string(),
@@ -285,6 +302,11 @@ mod tests {
         assert_eq!(inner["programmingLanguage"], "Rust");
         assert_eq!(inner["integrationName"], "secretsd");
         assert_eq!(inner["account_name"], "ExampleAccount");
+        // Confirmed end-to-end against a real account (see
+        // docs/architecture/1password-poc-results.md): a semver-looking
+        // placeholder here is rejected server-side on its own, regardless
+        // of every other field.
+        assert_eq!(inner["sdkVersion"], CONFIRMED_SDK_VERSION);
         assert!(inner.get("serviceAccountToken").is_some());
     }
 

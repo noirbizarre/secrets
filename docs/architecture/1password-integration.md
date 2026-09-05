@@ -307,6 +307,18 @@ not assumed from the pattern. A successful response's decoded payload is
 bare JSON for a `uint64` client ID (e.g. `42`), to be passed as
 `clientId` in every subsequent `invoke` call for this client.
 
+**`sdkVersion` is validated server-side and rejects a semver-looking
+placeholder on its own** — found only by `strace`-comparing this
+project's raw request bytes against the real Go SDK's own raw request
+bytes on the same socket (see
+`docs/architecture/1password-poc-results.md`'s "Root cause found"
+section for the full story). The Go SDK sends a 7-digit build-number
+string (its `//go:embed release/version-build` value, e.g. `"0040102"`
+for its `v0.4.1` release) — not `"v0.4.1"`, not any other semver shape.
+`protocol.rs`'s `CONFIRMED_SDK_VERSION` uses this exact confirmed value;
+treat it as a compatibility-fragile magic value, not a stable constant —
+see "Compatibility risk" below.
+
 **`invoke`'s inner payload** (`internal.InvokeConfig`):
 
 ```json
@@ -390,4 +402,14 @@ still just rejected by 1Password Desktop's own input validation (the
 `Err` path already observed above exists precisely for that), and there
 is no evidence from this investigation of a crash risk to Desktop
 itself. Step 8 proceeds using the confirmed protocol.
+
+The single most fragile part confirmed by this investigation is
+`sdkVersion` (`CONFIRMED_SDK_VERSION` in `protocol.rs`): a real, working
+value was found only by capturing what one specific Go SDK release
+(`v0.4.1`) actually sends, and 1Password Desktop's server-side
+validation rejects anything it does not recognize with an opaque error
+that names no specific field. If this integration ever starts failing
+again with the same `HttpStatus(400)`/"delegated session" shape, this
+field is the first thing to re-verify — the same way it was found here
+(`strace` a current official SDK release, compare raw bytes).
 </content>

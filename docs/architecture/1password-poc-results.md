@@ -6,7 +6,21 @@ against the task's own PASS/BLOCKED criteria — this is neither a full
 PASS nor an uninformative BLOCKED, and says so precisely rather than
 forcing one label.
 
-## Verdict: BLOCKED, but at a specific, external, well-isolated stage
+> **Revised verdict: PASS.** Everything below up to "Root cause found"
+> was the honest state of things at the time it was written — BLOCKED,
+> for the reasons described. It is kept as-is, not rewritten, because the
+> debugging methodology in it (isolating variables, ruling out causes one
+> at a time) is exactly what led to the actual root cause shortly after:
+> see "Root cause found: an independent cross-check" below, which
+> supersedes the "Likely cause" and "Recommendation" sections that
+> precede it. The daemon-side integration retrieves a real secret,
+> end-to-end, through this project's own code, as of that section.
+
+## Original verdict: BLOCKED, but at a specific, external, well-isolated stage
+
+*(Superseded — see the revision note above. Kept for its debugging
+methodology and because every individual finding in it is still true;
+only the final interpretation changed.)*
 
 **The daemon-side integration itself — the part `secretsd` controls —
 works completely, end to end, confirmed against the real Desktop app,
@@ -98,12 +112,13 @@ restart did produce a materially fresh attempt (a new session ID), which
 still failed identically — ruling out "stuck cached state from a
 previous run" as the explanation.
 
-### Likely cause
+### Likely cause (at the time — see below for the actual cause)
 
 Not library loading, not FFI/ABI mismatch, not JSON protocol
 compatibility, not this project's own authorization or session
 management logic — all five of those are confirmed working above. The
-remaining, most likely explanations, in order of likelihood:
+remaining, most likely explanations, in order of likelihood, *as they
+appeared at the time*:
 
 1. **Account- or environment-specific**: something about this specific
    1Password account, its subscription tier, or network reachability to
@@ -119,6 +134,78 @@ The user (repository owner) confirmed the required "Integrate with
 other apps" Desktop setting was already enabled before testing, so that
 specific, commonly-cited prerequisite is not the cause.
 
+This turned out to be wrong — not because the isolation work above was
+flawed in principle, but because of one thing it could not see: whether
+each "variation" was actually reaching a *fresh* session attempt at all
+(see below).
+
+## Root cause found: an independent cross-check
+
+Before committing to "account/server-side, nothing more to do,"
+the user asked to cross-check with the **official, unmodified 1Password
+Go SDK** (`github.com/1Password/onepassword-sdk-go`) against the same
+account and the same test reference — a pure diagnostic, no code in
+this repository depends on it.
+
+**The official Go SDK succeeded immediately and reproducibly**
+(`Client init: OK` / `Resolve: OK`, twice in a row). This directly
+contradicted "account/server-side, nothing client-side can fix" — an
+independent, unmodified client using the same account succeeded where
+this project's client failed, so *something* about this project's
+request differed in a way that mattered.
+
+### Why the earlier isolation looked conclusive but was not
+
+Re-examining the "Ruling out a request-format cause" table: after the
+Desktop restart, only the *first* subsequent call got a genuinely fresh
+session — the following calls (different `programmingLanguage`,
+`sdkVersion`, `integrationName`) silently reused that same already-failed
+session rather than starting a new delegation attempt, so those
+variations were never actually tested against a fresh session. This
+was found by tracing session IDs across attempts, and confirmed by
+methodically re-testing one variable at a time using **genuinely fresh
+sessions** (new, never-before-used `integrationName` values — which,
+contrary to the earlier table's conclusion, *does* scope a fresh
+session, matching the Go SDK's own successful new-name attempts).
+
+### The actual difference: `sdkVersion`'s format
+
+`strace -f -e trace=sendto` on the official Go SDK's process, run
+against the same account, captured its raw request bytes on the wire
+(the abstract socket, the same one this project uses). Decoding the
+`init_client` payload it actually sent:
+
+```json
+{"serviceAccountToken":"","programmingLanguage":"Go","sdkVersion":"0040102", ...}
+```
+
+`sdkVersion: "0040102"` — a 7-digit build-number encoding (the Go SDK's
+`//go:embed release/version-build` value, corresponding to its `v0.4.1`
+release), **not** a semver string like `"v0.4.1"` or a placeholder like
+`"0.1.0"`. Every one of this project's own attempts up to this point
+used a semver-shaped placeholder for this field. Retested with a fresh
+session and `sdkVersion` set to this exact confirmed value, everything
+else unchanged (`programmingLanguage: "Rust"`, this project's own
+`integrationName`): **`init_client` succeeded** (`{"success":true,"payload":[...client id...]}`),
+and the subsequent `SecretsResolve` `invoke` call **resolved the real
+test secret**, end-to-end, through this project's own `ffi.rs`/`ipc.rs`/
+`protocol.rs` — not the Go SDK.
+
+`protocol.rs`'s `init_client_request` now uses this confirmed value
+(`CONFIRMED_SDK_VERSION`), with a code comment explaining exactly this
+and flagging it as a compatibility-fragile magic value that may need
+re-confirming (the same way) if 1Password's accepted-version set ever
+changes.
+
+### What this means for the earlier findings
+
+Everything in "What was confirmed working, for real" above is still
+true and, if anything, more strongly confirmed now (a real secret was
+retrieved, not just an accepted-but-then-rejected request). The "Ruling
+out a request-format cause" table's *individual outcomes* were recorded
+accurately; only its *conclusion* ("not a request-format cause") was
+wrong, for the session-reuse reason explained above.
+
 ## A protocol detail confirmed only by this real run
 
 The response envelope's `payload` field is **not always** base64 text,
@@ -126,17 +213,21 @@ contrary to what reading only the Go SDK's client-side code would
 suggest. The failure response above arrived with `payload` as a raw
 JSON array of byte values instead of a base64 string — `protocol.rs`
 was corrected (Step 8's commit) to accept either shape, with a test
-using this real (redacted) shape.
+using this real (redacted) shape. The `init_client` success response
+observed after the fix (`{"success":true,"payload":[51]}`, a raw byte
+array decoding to ASCII `"3"`, the client ID) uses this same raw-array
+shape even on success — so this encoding is not exclusive to error
+paths either.
 
 ## Recommendation
 
-Do not implement `OnePasswordBackend` (Step 10) yet — there is nothing
-further to build against an integration that cannot complete its first
-real operation, and doing so now would mean shipping untestable code.
-If this is revisited later (a different account, after contacting
-1Password support, or once whatever is causing the HTTP 400 changes):
-Steps 5–8's code needs no rework to try again — `ffi.rs`, `ipc.rs`,
-`protocol.rs` and `session.rs` are all confirmed working against the
-real library and only need a session that successfully delegates to
-proceed to an actual `SecretsResolve` call.
+**Proceed to Step 10** (`OnePasswordBackend`) — the integration is
+confirmed working end-to-end against a real account and a real secret.
+Carry forward, prominently, in whatever documentation Step 10/12 write:
+`CONFIRMED_SDK_VERSION` is a specific, currently-working magic value
+tied to one historical Go SDK release, not a stable part of any
+published contract — treat it exactly like the rest of this adapter
+(see "Compatibility risk" in `docs/architecture/1password-integration.md`):
+due for re-verification against whatever is actually installed, the
+same way it was found here, if it ever stops being accepted.
 </content>
