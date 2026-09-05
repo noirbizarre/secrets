@@ -163,12 +163,35 @@ pub fn resolve_secret_request(
     client_id: u64,
     secret_reference: &str,
 ) -> Request {
+    invoke_request(
+        account_name,
+        client_id,
+        "SecretsResolve",
+        serde_json::json!({ "secret_reference": secret_reference }),
+    )
+}
+
+/// Build a generic `invoke` request calling `method_name` with
+/// `parameters`, against an already-initialized `client_id`.
+///
+/// The one seam every `OnePasswordBackend` operation
+/// (`VaultsList`/`ItemsList`/`ItemsGetAll`/`SecretsResolve`) builds its
+/// request through — method names and parameter shapes are confirmed
+/// against the Go SDK's own source per operation (see
+/// `docs/architecture/1password-integration.md`), not invented here.
+#[must_use]
+pub fn invoke_request(
+    account_name: &str,
+    client_id: u64,
+    method_name: &'static str,
+    parameters: serde_json::Value,
+) -> Request {
     let config = InvokeConfig {
         invocation: Invocation {
             client_id: Some(client_id),
             parameters: Parameters {
-                name: "SecretsResolve".to_string(),
-                parameters: serde_json::json!({ "secret_reference": secret_reference }),
+                name: method_name.to_string(),
+                parameters,
             },
         },
     };
@@ -243,6 +266,27 @@ fn decode_response(bytes: &[u8]) -> Result<Vec<u8>, ProtocolError> {
 ///
 /// See [`decode_response`] and [`ProtocolError::UnexpectedPayloadShape`].
 pub fn parse_client_id(response_bytes: &[u8]) -> Result<u64, ProtocolError> {
+    let payload = decode_response(response_bytes)?;
+    serde_json::from_slice(&payload).map_err(|_| ProtocolError::UnexpectedPayloadShape)
+}
+
+/// Parse a generic `invoke` response's payload as `T` — the counterpart
+/// to [`invoke_request`] for operations
+/// (`VaultsList`/`ItemsList`/`ItemsGetAll`/...) whose success payload
+/// isn't a fixed, dedicated type this module models itself.
+///
+/// # Errors
+///
+/// See [`decode_response`] (a `"success": false` response is
+/// [`ProtocolError::Failure`] here too — see
+/// [`super::types::InvokeErrorPayload`] for parsing its `message` on the
+/// caller's side, since only `OnePasswordBackend` knows which
+/// missing-vault/item/field text to match against for a given
+/// operation) and [`ProtocolError::UnexpectedPayloadShape`] if `T`
+/// doesn't match.
+pub fn parse_invoke_response<T: serde::de::DeserializeOwned>(
+    response_bytes: &[u8],
+) -> Result<T, ProtocolError> {
     let payload = decode_response(response_bytes)?;
     serde_json::from_slice(&payload).map_err(|_| ProtocolError::UnexpectedPayloadShape)
 }

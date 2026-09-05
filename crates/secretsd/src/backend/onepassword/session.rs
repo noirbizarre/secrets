@@ -51,8 +51,15 @@ pub const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(5 * 60);
 ///
 /// Abstracted so this module's single-flight/timeout/state-machine logic
 /// is testable without a real IPC round trip, and so a real
-/// authentication request — once/if its schema is confirmed — can be
-/// plugged in without touching this file at all.
+/// authentication request can be plugged in without touching this file.
+///
+/// Returns the 1Password-assigned client ID an authentication attempt
+/// establishes — 1Password Desktop's `init_client` operation returns one
+/// (see `docs/architecture/1password-integration.md`), and every
+/// subsequent `invoke` call must reference it. [`SessionManager`] holds
+/// this alongside its own validity tracking and hands it to
+/// [`SessionManager::execute`]'s operation closure — it is 1Password's
+/// own session handle, not a credential, and is never itself secret.
 pub trait Authenticator: Send + Sync {
     /// Attempt to establish (or renew) a session over `client`.
     ///
@@ -61,7 +68,7 @@ pub trait Authenticator: Send + Sync {
     /// Any [`SessionError`] appropriate to what went wrong; this trait
     /// does not itself impose a timeout — [`SessionManager`] bounds the
     /// call from the outside (see [`SessionManager::execute`]'s doc).
-    fn authenticate(&self, client: &IpcClient) -> Result<(), SessionError>;
+    fn authenticate(&self, client: &IpcClient) -> Result<u64, SessionError>;
 }
 
 /// Everything that can go wrong establishing or using a session. Carries
@@ -104,12 +111,33 @@ enum SessionState {
     /// A session is currently being established or renewed — every other
     /// caller waits on this one attempt rather than starting their own.
     Authenticating,
-    /// A session exists and is valid until `expires_at`.
-    Valid { expires_at: Instant },
+    /// A session exists and is valid until `expires_at`, referencing
+    /// 1Password's own `client_id` (see [`Authenticator`]'s doc — not a
+    /// credential, 1Password's own session handle).
+    Valid { expires_at: Instant, client_id: u64 },
 }
 
 struct Inner {
     state: SessionState,
+}
+
+/// A snapshot of the session's current lifecycle state, without
+/// triggering any authentication attempt — for callers that need to
+/// *report* status (e.g. `OnePasswordBackend`'s `BackendSession` impl,
+/// mapping this to `secrets_core::BackendStatus`), not *use* the
+/// session. Deliberately not `secrets_core`-shaped itself — this module
+/// stays isolated from `secrets_core`, same as every other module in
+/// this tree; only `backend.rs` bridges the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionSnapshot {
+    /// No session has been established yet, or the last attempt failed.
+    Missing,
+    /// A session is currently being established or renewed.
+    Authenticating,
+    /// A session exists and has not yet expired.
+    Valid,
+    /// A session existed but its TTL has elapsed.
+    Expired,
 }
 
 /// Owns a session's lifecycle over one [`IpcClient`], serializing
@@ -158,7 +186,8 @@ impl SessionManager {
 
     /// Ensure a valid session exists (authenticating or renewing exactly
     /// once, however many callers are concurrently waiting on it), then
-    /// run `operation` against the underlying client.
+    /// run `operation` against the underlying client and 1Password's own
+    /// `client_id` for the current session.
     ///
     /// Bounded, on every path: a caller that becomes the one responsible
     /// for authenticating has that attempt itself run on its own thread,
@@ -173,18 +202,37 @@ impl SessionManager {
     /// is propagated via [`SessionError::Ipc`].
     pub fn execute<T>(
         &self,
-        operation: impl FnOnce(&IpcClient) -> Result<T, super::ipc::IpcError>,
+        operation: impl FnOnce(&IpcClient, u64) -> Result<T, super::ipc::IpcError>,
     ) -> Result<T, SessionError> {
-        self.ensure_authenticated()?;
-        operation(&self.client).map_err(SessionError::from)
+        let client_id = self.ensure_authenticated()?;
+        operation(&self.client, client_id).map_err(SessionError::from)
     }
 
-    fn ensure_authenticated(&self) -> Result<(), SessionError> {
+    /// A snapshot of the current session state — never triggers
+    /// authentication, never blocks on another caller's in-flight
+    /// attempt. See [`SessionSnapshot`].
+    #[must_use]
+    pub fn snapshot(&self) -> SessionSnapshot {
+        let guard = self.inner.lock().expect("poisoned");
+        match guard.state {
+            SessionState::Missing => SessionSnapshot::Missing,
+            SessionState::Authenticating => SessionSnapshot::Authenticating,
+            SessionState::Valid { expires_at, .. } if expires_at > Instant::now() => {
+                SessionSnapshot::Valid
+            }
+            SessionState::Valid { .. } => SessionSnapshot::Expired,
+        }
+    }
+
+    fn ensure_authenticated(&self) -> Result<u64, SessionError> {
         let mut guard = self.inner.lock().expect("poisoned");
         loop {
             match guard.state {
-                SessionState::Valid { expires_at } if expires_at > Instant::now() => {
-                    return Ok(());
+                SessionState::Valid {
+                    expires_at,
+                    client_id,
+                } if expires_at > Instant::now() => {
+                    return Ok(client_id);
                 }
                 SessionState::Authenticating => {
                     // Someone else is already authenticating — wait to be
@@ -224,8 +272,9 @@ impl SessionManager {
 
         let mut guard = self.inner.lock().expect("poisoned");
         guard.state = match &result {
-            Ok(()) => SessionState::Valid {
+            Ok(client_id) => SessionState::Valid {
                 expires_at: Instant::now() + self.session_ttl,
+                client_id: *client_id,
             },
             Err(_) => SessionState::Missing,
         };
@@ -245,10 +294,10 @@ impl SessionManager {
 /// call itself, applied here to an arbitrary [`Authenticator`]
 /// implementation instead.
 fn run_with_timeout(
-    work: impl FnOnce() -> Result<(), SessionError> + Send + 'static,
+    work: impl FnOnce() -> Result<u64, SessionError> + Send + 'static,
     timeout: Duration,
     thread_name: &str,
-) -> Result<(), SessionError> {
+) -> Result<u64, SessionError> {
     let (sender, receiver) = mpsc::channel();
     let spawned = std::thread::Builder::new()
         .name(thread_name.to_string())
@@ -325,9 +374,9 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
     }
 
     impl Authenticator for CountingAuthenticator {
-        fn authenticate(&self, _client: &IpcClient) -> Result<(), SessionError> {
+        fn authenticate(&self, _client: &IpcClient) -> Result<u64, SessionError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+            Ok(1)
         }
     }
 
@@ -336,7 +385,7 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
     struct UnavailableAuthenticator;
 
     impl Authenticator for UnavailableAuthenticator {
-        fn authenticate(&self, _client: &IpcClient) -> Result<(), SessionError> {
+        fn authenticate(&self, _client: &IpcClient) -> Result<u64, SessionError> {
             Err(SessionError::Unavailable)
         }
     }
@@ -347,10 +396,53 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
     struct HangingAuthenticator;
 
     impl Authenticator for HangingAuthenticator {
-        fn authenticate(&self, _client: &IpcClient) -> Result<(), SessionError> {
+        fn authenticate(&self, _client: &IpcClient) -> Result<u64, SessionError> {
             std::thread::sleep(Duration::from_secs(10));
-            Ok(())
+            Ok(1)
         }
+    }
+
+    #[test]
+    fn the_operation_receives_the_client_id_authenticate_established() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(client) = echo_client(dir.path()) else {
+            eprintln!("skipping: no C compiler available");
+            return;
+        };
+        // `CountingAuthenticator::authenticate` always establishes
+        // client_id 1 — confirm `execute` hands that exact value to the
+        // operation, not just "some" id.
+        let manager = SessionManager::new(client, Arc::new(CountingAuthenticator::new()));
+
+        let observed = manager.execute(|_, client_id| Ok(client_id)).unwrap();
+        assert_eq!(observed, 1);
+    }
+
+    #[test]
+    fn snapshot_reflects_state_without_triggering_authentication() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(client) = echo_client(dir.path()) else {
+            eprintln!("skipping: no C compiler available");
+            return;
+        };
+        let authenticator = Arc::new(CountingAuthenticator::new());
+        let manager = SessionManager::with_timing(
+            client,
+            authenticator.clone(),
+            Duration::from_millis(1),
+            DEFAULT_AUTH_TIMEOUT,
+        );
+
+        assert_eq!(manager.snapshot(), SessionSnapshot::Missing);
+        assert_eq!(authenticator.calls.load(Ordering::SeqCst), 0);
+
+        manager.execute(|_, _client_id| Ok(())).unwrap();
+        assert_eq!(manager.snapshot(), SessionSnapshot::Valid);
+
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(manager.snapshot(), SessionSnapshot::Expired);
+        // Still hasn't re-authenticated just from being snapshotted.
+        assert_eq!(authenticator.calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -363,8 +455,9 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
         let authenticator = Arc::new(CountingAuthenticator::new());
         let manager = SessionManager::new(client, authenticator.clone());
 
-        let result =
-            manager.execute(|client| client.invoke(&super::super::ipc::Request(b"hi".to_vec())));
+        let result = manager.execute(|client, _client_id| {
+            client.invoke(&super::super::ipc::Request(b"hi".to_vec()))
+        });
 
         assert!(result.is_ok());
         assert_eq!(authenticator.calls.load(Ordering::SeqCst), 1);
@@ -385,8 +478,8 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
             DEFAULT_AUTH_TIMEOUT,
         );
 
-        manager.execute(|_| Ok(())).unwrap();
-        manager.execute(|_| Ok(())).unwrap();
+        manager.execute(|_, _client_id| Ok(())).unwrap();
+        manager.execute(|_, _client_id| Ok(())).unwrap();
 
         assert_eq!(authenticator.calls.load(Ordering::SeqCst), 1);
     }
@@ -408,9 +501,9 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
             DEFAULT_AUTH_TIMEOUT,
         );
 
-        manager.execute(|_| Ok(())).unwrap();
+        manager.execute(|_, _client_id| Ok(())).unwrap();
         std::thread::sleep(Duration::from_millis(20));
-        manager.execute(|_| Ok(())).unwrap();
+        manager.execute(|_, _client_id| Ok(())).unwrap();
 
         assert_eq!(authenticator.calls.load(Ordering::SeqCst), 2);
     }
@@ -429,7 +522,7 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
             for _ in 0..16 {
                 let manager = Arc::clone(&manager);
                 scope.spawn(move || {
-                    manager.execute(|_| Ok(())).unwrap();
+                    manager.execute(|_, _client_id| Ok(())).unwrap();
                 });
             }
         });
@@ -450,7 +543,7 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
         };
         let manager = SessionManager::new(client, Arc::new(UnavailableAuthenticator));
 
-        let error = manager.execute(|_| Ok(())).unwrap_err();
+        let error = manager.execute(|_, _client_id| Ok(())).unwrap_err();
         assert!(matches!(error, SessionError::Unavailable));
     }
 
@@ -468,7 +561,7 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
             Duration::from_millis(200),
         );
 
-        let error = manager.execute(|_| Ok(())).unwrap_err();
+        let error = manager.execute(|_, _client_id| Ok(())).unwrap_err();
         assert!(matches!(error, SessionError::Timeout));
     }
 
@@ -490,7 +583,7 @@ void op_sdk_ipc_free_response(uint8_t *buf, size_t len, size_t cap) {
             let handles: Vec<_> = (0..4)
                 .map(|_| {
                     let manager = Arc::clone(&manager);
-                    scope.spawn(move || manager.execute(|_| Ok(())))
+                    scope.spawn(move || manager.execute(|_, _client_id| Ok(())))
                 })
                 .collect();
             handles.into_iter().map(|h| h.join().unwrap()).collect()

@@ -96,6 +96,20 @@ its password is.
 - **No signal-based graceful shutdown.** `secretsd` relies on the OS to
   reclaim its memory on termination; it does not currently intercept
   `SIGTERM` to zeroize state before exiting (see "Memory hygiene" above).
+- **The 1Password backend's `list_items` briefly holds decrypted field
+  *values* in memory, even though it only reports metadata.** Unlike
+  `LocalBackend` (which truly never touches encrypted values to list
+  fields), 1Password's `ItemsGetAll` API has no "metadata only" mode —
+  fetching field names/types at all means fetching a full, decrypted
+  item, values included, in the same response. `OnePasswordBackend`
+  never copies a value into anything it holds onto (its own `ItemField`
+  type has no `value` field to deserialize into), and the raw response
+  buffer is explicitly zeroized immediately after parsing — but the
+  underlying `ipc::Response` type this buffer briefly passes through is
+  not itself `Zeroize`/`ZeroizeOnDrop` (unlike `SecretValue`/`VaultKey`,
+  see "Memory hygiene" above), so a copy of that buffer exists,
+  un-zeroized, for the duration of one native call and one parse. See
+  `crates/secretsd/src/backend/onepassword/backend.rs`'s `list_items`.
 
 ## Reporting a vulnerability
 

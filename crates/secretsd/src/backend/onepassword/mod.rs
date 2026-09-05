@@ -8,14 +8,20 @@
 //! by the rest of this module tree; the raw C ABI and every `unsafe`
 //! block live exclusively in [`ffi`].
 //!
-//! Not yet implemented: the actual `Backend`/`BackendSession` types —
-//! pending a real, end-to-end confirmation via the probe (see
-//! `docs/architecture/1password-integration.md`).
+//! The confirmed, end-to-end-validated `Backend`/`BackendSession`
+//! implementation itself lives in [`backend`], re-exported here as
+//! [`OnePasswordBackend`] for a clean call site
+//! (`onepassword::OnePasswordBackend`, not
+//! `onepassword::backend::OnePasswordBackend`).
 
+mod backend;
 pub mod ffi;
 pub mod ipc;
 pub mod protocol;
 pub mod session;
+pub mod types;
+
+pub use backend::OnePasswordBackend;
 
 #[cfg(test)]
 pub(crate) mod test_support;
