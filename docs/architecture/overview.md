@@ -30,7 +30,8 @@ flowchart TB
     end
 
     local[(Local encrypted file)]
-    future[(Vaultwarden / Bitwarden /<br/>1Password / pass / gopass / passage)]
+    onepassword[(1Password Desktop<br/>native IPC)]
+    future[(Vaultwarden / Bitwarden /<br/>pass / gopass / passage)]
 
     cli -- D-Bus --> manager
     gtk -. D-Bus .-> manager
@@ -44,6 +45,7 @@ flowchart TB
     state --> resolver
     resolver --> backend
     backend --> local
+    backend --> onepassword
     backend -. not yet .-> future
 ```
 
@@ -57,19 +59,22 @@ flowchart TB
    sessions.
 3. **Backend** (`secrets-core::backend`) — the contract a storage
    implementation satisfies: `list_vaults`, `list_items`, `get_field`.
-   Deliberately small and read-only for the MVP; see
+   Deliberately small and read-only; see
    [ADR-008](../adr/008-backend-abstraction-and-roadmap.md). A second,
    optional trait, `BackendSession`, lets a backend report its own
    authentication/session state, distinct from `DaemonState`'s daemon-wide
    lock — see [ADR-011](../adr/011-backend-session-and-authentication-state.md).
-   The investigation behind the first backend expected to use it (1Password
-   Desktop) is in
-   [1password-integration.md](1password-integration.md).
+   Two implementations exist: the local encrypted file, and 1Password
+   Desktop's native IPC channel (not the `op` CLI) — see
+   [ADR-012](../adr/012-1password-desktop-backend.md),
+   [1password-integration.md](1password-integration.md) and
+   [1password-poc-results.md](1password-poc-results.md) for the
+   investigation and validation behind it.
 4. **`secretsd`** — the daemon. Owns `DaemonState` (session/lock — see
-   [ADR-009](../adr/009-session-and-lock-state-machine.md)), the one
-   MVP backend implementation (a local encrypted file — see
-   [ADR-006](../adr/006-local-backend-cryptography.md)), and three
-   protocol surfaces: `org.secrets.Manager`
+   [ADR-009](../adr/009-session-and-lock-state-machine.md)),
+   configuration-selected backend (`[backend] type = "local" |
+   "1password"` — see [config.rs](../../crates/secretsd/src/config.rs)),
+   and three protocol surfaces: `org.secrets.Manager`
    ([ADR-005](../adr/005-native-manager-api-design.md)), the Secret
    Service compatibility interfaces
    ([ADR-004](../adr/004-secret-service-compatibility-scope.md)), and the

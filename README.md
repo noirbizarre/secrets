@@ -110,13 +110,18 @@ SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/secrets/ssh-agent.sock ssh-add -L
 Full roadmap, tracked by category with checkboxes: [`PLAN.md`](PLAN.md).
 Design rationale for every non-obvious decision: [`docs/adr/`](docs/adr/).
 
-## Future backends
+## Backends
 
 The `Backend` trait (`crates/secrets-core/src/backend.rs`) is deliberately
 small so more implementations can be added without touching `secretsd`'s
-D-Bus surface: Vaultwarden and Bitwarden (API-based), 1Password
-(API-based), and `pass`/`gopass`/`passage` (GPG- or age-encrypted files on
-disk) are the tracked candidates — see `PLAN.md` §7.
+D-Bus surface. Two exist today: the local encrypted file (the MVP
+default), and 1Password Desktop, via its native IPC library rather than
+the `op` CLI (`crates/secretsd/src/backend/onepassword/`, selected with
+`[backend] type = "1password"` — see
+[ADR-012](docs/adr/012-1password-desktop-backend.md)). Vaultwarden and
+Bitwarden (API-based) and `pass`/`gopass`/`passage` (GPG- or
+age-encrypted files on disk) are the remaining tracked candidates — see
+`PLAN.md` §7.
 
 ## Documentation
 

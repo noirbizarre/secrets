@@ -565,4 +565,35 @@ mod tests {
 
         assert_eq!(backend.backend_status(), BackendStatus::Authenticated);
     }
+
+    /// Opt-in, local-only: exercises `OnePasswordBackend` against a real,
+    /// installed 1Password Desktop — never required in CI (`#[ignore]`;
+    /// CI has no 1Password Desktop to authorize against). Run manually:
+    ///
+    /// ```text
+    /// SECRETS_OP_ACCOUNT_NAME="<account name>" \
+    /// SECRETS_OP_TEST_VAULT="<vault>" \
+    /// SECRETS_OP_TEST_ITEM="<item>" \
+    /// SECRETS_OP_TEST_FIELD="<field>" \
+    /// cargo test --package secretsd --lib backend::onepassword::backend::tests::real_desktop_resolves_a_known_field -- --ignored
+    /// ```
+    ///
+    /// Never prints the resolved value — only that one was obtained.
+    #[test]
+    #[ignore = "requires a real, installed 1Password Desktop and account — see this test's own doc comment"]
+    fn real_desktop_resolves_a_known_field() {
+        let account_name = std::env::var("SECRETS_OP_ACCOUNT_NAME")
+            .expect("SECRETS_OP_ACCOUNT_NAME must be set for this opt-in test");
+        let vault = std::env::var("SECRETS_OP_TEST_VAULT")
+            .expect("SECRETS_OP_TEST_VAULT must be set for this opt-in test");
+        let item_title = std::env::var("SECRETS_OP_TEST_ITEM")
+            .expect("SECRETS_OP_TEST_ITEM must be set for this opt-in test");
+        let field = std::env::var("SECRETS_OP_TEST_FIELD")
+            .expect("SECRETS_OP_TEST_FIELD must be set for this opt-in test");
+
+        let backend = OnePasswordBackend::open(account_name).unwrap();
+        let item = ItemPath::new(vec![item_title]).unwrap();
+        let value = backend.get_field(&vault, &item, &field).unwrap();
+        assert!(!value.expose_secret().is_empty());
+    }
 }

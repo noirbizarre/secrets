@@ -39,3 +39,4 @@ by editing the old one. The history is the value.
   client only
 - [ADR-011](011-backend-session-and-authentication-state.md) — Backend
   session and authentication state
+- [ADR-012](012-1password-desktop-backend.md) — 1Password Desktop backend

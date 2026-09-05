@@ -125,7 +125,14 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 7.1 Local encrypted-file backend (MVP)
 - [ ] 7.2 [Future] Vaultwarden
 - [ ] 7.3 [Future] Bitwarden
-- [ ] 7.4 [Future] 1Password
+- [x] 7.4 1Password Desktop, via its native IPC library (not the `op`
+      CLI) — `crates/secretsd/src/backend/onepassword/`, selected via
+      `[backend] type = "1password"` in `secretsd.toml`. See
+      [ADR-012](docs/adr/012-1password-desktop-backend.md) and
+      `docs/architecture/1password-poc-results.md` for the investigation
+      and validation this is built on. TOTP/SSH-specific behavior
+      deliberately not implemented here (Secrets-level concerns, see the
+      ADR).
 - [ ] 7.5 [Future] `pass`
 - [ ] 7.6 [Future] `gopass`
 - [ ] 7.7 [Future] `passage`
