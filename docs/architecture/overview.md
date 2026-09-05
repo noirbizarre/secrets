@@ -58,7 +58,13 @@ flowchart TB
 3. **Backend** (`secrets-core::backend`) — the contract a storage
    implementation satisfies: `list_vaults`, `list_items`, `get_field`.
    Deliberately small and read-only for the MVP; see
-   [ADR-008](../adr/008-backend-abstraction-and-roadmap.md).
+   [ADR-008](../adr/008-backend-abstraction-and-roadmap.md). A second,
+   optional trait, `BackendSession`, lets a backend report its own
+   authentication/session state, distinct from `DaemonState`'s daemon-wide
+   lock — see [ADR-011](../adr/011-backend-session-and-authentication-state.md).
+   The investigation behind the first backend expected to use it (1Password
+   Desktop) is in
+   [1password-integration.md](1password-integration.md).
 4. **`secretsd`** — the daemon. Owns `DaemonState` (session/lock — see
    [ADR-009](../adr/009-session-and-lock-state-machine.md)), the one
    MVP backend implementation (a local encrypted file — see

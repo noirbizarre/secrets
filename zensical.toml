@@ -24,6 +24,7 @@ nav = [
   { "Architecture" = [
     { "Overview" = "architecture/overview.md" },
     { "Future clients" = "architecture/clients.md" },
+    { "1Password Desktop integration" = "architecture/1password-integration.md" },
   ] },
   { "secret:// URI scheme" = "secret-uri.md" },
   { "D-Bus API" = [

@@ -17,3 +17,9 @@ extend-exclude = [
 # Deliberate misspellings that a test asserts on — typically the input to a
 # "did you mean ...?" diagnostic. Correcting one here deletes the test that
 # proves the suggestion works.
+
+# Not our typo: this is 1Password Desktop's own literal, load-bearing abstract
+# socket name (embedded verbatim in libop_sdk_ipc_client.so's .rodata), quoted
+# exactly in docs/architecture/1password-integration.md. "Correcting" it here
+# would make the documentation say something that does not match the binary.
+intergations = "intergations"
