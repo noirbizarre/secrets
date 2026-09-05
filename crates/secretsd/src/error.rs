@@ -53,6 +53,32 @@ pub enum DaemonError {
     #[error("D-Bus setup failed: {0}")]
     #[diagnostic(code(secrets::daemon::dbus_setup))]
     DBusSetup(#[from] zbus::Error),
+
+    /// The daemon's own config file (`[backend]` and friends) exists but
+    /// could not be read or parsed.
+    #[error("could not read configuration at {path}: {reason}")]
+    #[diagnostic(code(secrets::daemon::config_unreadable))]
+    ConfigUnreadable {
+        /// The configuration file's path.
+        path: std::path::PathBuf,
+        /// What went wrong, in human terms.
+        reason: String,
+    },
+
+    /// `[backend] type = "1password"` is set, but a required field for
+    /// that backend (e.g. `account_name`) is missing.
+    #[error("invalid backend configuration: {0}")]
+    #[diagnostic(
+        code(secrets::daemon::invalid_backend_config),
+        help("see docs/architecture/1password-integration.md for the required [backend] fields")
+    )]
+    InvalidBackendConfig(String),
+
+    /// The configured backend could not be started (e.g. 1Password
+    /// Desktop's native IPC library could not be loaded).
+    #[error("backend unavailable at startup: {0}")]
+    #[diagnostic(code(secrets::daemon::backend_unavailable))]
+    BackendUnavailable(String),
 }
 
 /// The daemon's result alias.

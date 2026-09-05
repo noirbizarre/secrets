@@ -37,11 +37,15 @@ fn run() -> Result<(), DaemonError> {
 
     // The Secret Service compatibility layer's object topology is fixed at
     // startup — see the module-level doc on `secret_service` for why.
-    let topology =
-        secret_service::discover(&state).map_err(|error| DaemonError::VaultFileUnreadable {
-            path: std::path::PathBuf::new(),
-            reason: error.to_string(),
-        })?;
+    //
+    // `discover`'s error isn't specifically about "the vault file" —
+    // that was only ever true when `LocalBackend` was the only backend;
+    // any backend's `list_vaults`/`list_items` can fail here now (e.g. a
+    // 1Password backend whose Desktop authorization was denied), so this
+    // maps to the generic, accurate `BackendUnavailable` instead of
+    // mislabeling every possible cause as a vault file problem.
+    let topology = secret_service::discover(&state)
+        .map_err(|error| DaemonError::BackendUnavailable(error.to_string()))?;
 
     let mut builder = zbus::blocking::connection::Builder::session()?
         .serve_at(MANAGER_PATH, ManagerIface::new(state.clone()))?

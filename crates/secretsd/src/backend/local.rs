@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::{self, Encrypted, VaultKey};
 use crate::error::{DaemonError, Result};
+use crate::state::LockController;
 
 /// A fixed plaintext encrypted alongside the vault key's salt, purely so
 /// `unlock` can tell "wrong passphrase" apart from "empty vault" — an
@@ -212,6 +213,24 @@ impl LocalBackend {
     /// [`LocalBackend::unlock`].
     pub fn lock(&self) {
         *self.key.lock().expect("poisoned") = None;
+    }
+}
+
+impl LockController for LocalBackend {
+    // Thin delegation to the inherent methods above: `LocalBackend`'s own
+    // tests call those directly (no need to go through a trait object for
+    // that), while `DaemonState` needs this impl to hold it as
+    // `Arc<dyn LockController>`.
+    fn is_unlocked(&self) -> bool {
+        LocalBackend::is_unlocked(self)
+    }
+
+    fn unlock(&self, passphrase: &str) -> Result<()> {
+        LocalBackend::unlock(self, passphrase)
+    }
+
+    fn lock(&self) {
+        LocalBackend::lock(self);
     }
 }
 

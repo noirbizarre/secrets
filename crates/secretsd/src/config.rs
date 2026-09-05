@@ -1,20 +1,20 @@
 //! Backend selection configuration.
 //!
-//! Prepares the `[backend]` table's shape ahead of actually selecting
-//! between backends. `secretsd` does not load a config file at all yet —
-//! [`Config`] is not wired into [`crate::state::open_default_state`] until
-//! a step that has a second backend to select (see PLAN.md §7 and
-//! ADR-0008). Landing the shape now, with its own parsing tests, means
-//! that later step is pure wiring rather than also inventing this type.
-//!
-//! `#[allow(dead_code)]` on both types below is deliberate, not an
-//! oversight: nothing outside `#[cfg(test)]` constructs them yet.
+//! Loads `~/.config/secrets/secretsd.toml` (following the same XDG
+//! convention `secrets-cli`'s own `Config` uses, under a different
+//! filename so the two never collide in the shared `secrets/` prefix
+//! directory). An absent file — today's only supported shape until a
+//! second backend is configured — keeps behaving exactly as before this
+//! module was wired into [`crate::state::open_default_state`].
+
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
-/// The `[backend]` table of the (not yet loaded) daemon config file.
-#[allow(dead_code)]
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+use crate::error::{DaemonError, Result};
+
+/// The daemon's configuration file contents.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Which backend to activate. Defaults to [`BackendKind::Local`], so
@@ -24,26 +24,74 @@ pub struct Config {
     pub backend: BackendKind,
 }
 
+impl Config {
+    /// Load `~/.config/secrets/secretsd.toml`, or return the default
+    /// (local backend) configuration if it does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DaemonError::ConfigUnreadable`] if the file exists but is
+    /// not valid TOML or does not match [`Config`]'s shape.
+    pub fn load() -> Result<Self> {
+        let Some(path) = config_path() else {
+            return Ok(Self::default());
+        };
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let contents =
+            std::fs::read_to_string(&path).map_err(|error| DaemonError::ConfigUnreadable {
+                path: path.clone(),
+                reason: error.to_string(),
+            })?;
+        toml::from_str(&contents).map_err(|error| DaemonError::ConfigUnreadable {
+            path,
+            reason: error.to_string(),
+        })
+    }
+}
+
+/// The config file's path, if `XDG_CONFIG_HOME` (or its fallback) could be
+/// determined at all.
+fn config_path() -> Option<PathBuf> {
+    let xdg = xdg::BaseDirectories::with_prefix("secrets");
+    Some(xdg.get_config_home()?.join("secretsd.toml"))
+}
+
 /// Which backend implementation a daemon instance activates.
 ///
 /// Exactly one is active per daemon instance: this project does not do
 /// multi-backend or multi-vault routing (see ADR-0008).
-#[allow(dead_code)]
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum BackendKind {
     /// The local encrypted-file backend — the only one implemented so far.
     #[default]
     Local,
-    /// 1Password Desktop, via its native IPC library. Not yet implemented
-    /// — see `docs/architecture/1password-integration.md`.
+    /// 1Password Desktop, via its native IPC library — see
+    /// `docs/architecture/1password-integration.md`.
     #[serde(rename = "1password")]
-    OnePassword,
+    OnePassword {
+        /// The 1Password account name or account UUID, as shown in the
+        /// Desktop app's sidebar — required by the protocol itself, not
+        /// an implementation choice (see `protocol::init_client_request`'s
+        /// own doc comment).
+        account_name: String,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_config_file_yields_the_default_local_configuration() {
+        // XDG_CONFIG_HOME is whatever the test environment has; the
+        // meaningful assertion is simply that this never errors and
+        // defaults to Local, since a config file is optional.
+        let config = Config::load().unwrap();
+        assert_eq!(config.backend, BackendKind::Local);
+    }
 
     #[test]
     fn an_absent_backend_table_defaults_to_local() {
@@ -58,9 +106,23 @@ mod tests {
     }
 
     #[test]
-    fn a_1password_backend_type_parses() {
-        let config: Config = toml::from_str("[backend]\ntype = \"1password\"\n").unwrap();
-        assert_eq!(config.backend, BackendKind::OnePassword);
+    fn a_1password_backend_type_parses_with_its_account_name() {
+        let config: Config =
+            toml::from_str("[backend]\ntype = \"1password\"\naccount_name = \"MyAccount\"\n")
+                .unwrap();
+        assert_eq!(
+            config.backend,
+            BackendKind::OnePassword {
+                account_name: "MyAccount".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn a_1password_backend_type_without_an_account_name_is_rejected() {
+        let result: std::result::Result<Config, _> =
+            toml::from_str("[backend]\ntype = \"1password\"\n");
+        assert!(result.is_err());
     }
 
     #[test]

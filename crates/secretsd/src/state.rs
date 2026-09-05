@@ -13,48 +13,100 @@ use secrets_core::{
 };
 
 use crate::backend::local::LocalBackend;
-use crate::error::Result;
+use crate::error::{DaemonError, Result};
+
+/// The daemon-wide lock/unlock mechanism (ADR-0009) — distinct from a
+/// backend's own session (ADR-0011, [`BackendSession`]). `LocalBackend`
+/// implements this over its passphrase-derived key (its "unlock" *is*
+/// the daemon lock — see ADR-0006/0009). A backend with no local secret
+/// of its own to protect this way (1Password Desktop, which gates access
+/// through its own [`BackendSession`] instead) uses
+/// [`AlwaysUnlocked`] — there is nothing for a daemon-wide passphrase
+/// lock to mean in that case, so it is a deliberate, documented no-op,
+/// not an oversight.
+///
+/// Kept `secretsd`-internal (not in `secrets-core`): unlike `Backend`/
+/// `BackendSession`, no other crate needs to know this trait's shape —
+/// `secrets-cli` only ever reaches lock state through `DaemonState` via
+/// D-Bus, never this trait directly.
+pub trait LockController: Send + Sync {
+    /// Whether the store is currently unlocked.
+    fn is_unlocked(&self) -> bool;
+
+    /// Unlock (or, for `LocalBackend`, on first run, initialize) the
+    /// store.
+    ///
+    /// # Errors
+    ///
+    /// Backend-specific; see the implementing type.
+    fn unlock(&self, passphrase: &str) -> Result<()>;
+
+    /// Lock the store, dropping any derived key from memory.
+    fn lock(&self);
+}
+
+/// The trivial [`LockController`] for backends with no daemon-wide
+/// passphrase lock of their own — see the trait's own doc comment for
+/// why this is correct, not a missing feature. `unlock`/`lock` are
+/// deliberate no-ops; `is_unlocked` always reports `true`, so the
+/// daemon-wide lock check in [`DaemonState::get`]/
+/// [`DaemonState::validate_reference`] always passes, leaving the
+/// *real* gating to that backend's own [`BackendSession`].
+pub struct AlwaysUnlocked;
+
+impl LockController for AlwaysUnlocked {
+    fn is_unlocked(&self) -> bool {
+        true
+    }
+
+    fn unlock(&self, _passphrase: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn lock(&self) {}
+}
 
 /// Shared daemon state.
 ///
 /// `backend` is the read path (`list_vaults`/`list_items`/resolution) —
 /// held as `Arc<dyn Backend>` so it works against any backend, per
-/// ADR-0008. `local` is kept alongside it, concretely typed, purely for
-/// lock/unlock/status: those three operations are not part of the
-/// `Backend` trait (they vary too much between backend shapes to force
-/// into one signature yet), and the local backend remains the only
-/// implementation of them for now.
+/// ADR-0008. `lock_controller` is kept alongside it for lock/unlock/
+/// status: those three operations are not part of the `Backend` trait
+/// (they vary too much between backend shapes to force into one
+/// signature) — see [`LockController`].
 ///
 /// `session` is the daemon-wide lock's conceptual opposite number: an
 /// *external* backend's own authentication/session state (see
-/// [`BackendSession`], ADR-0011), distinct from `local`'s lock/unlock.
-/// `None` for backends with no such concept — the local backend never
-/// sets this, since its "unlock" already is the daemon lock.
+/// [`BackendSession`], ADR-0011), distinct from `lock_controller`'s
+/// lock/unlock. `None` for backends with no such concept — the local
+/// backend never sets this, since its "unlock" already is the daemon
+/// lock.
 pub struct DaemonState {
     backend: Arc<dyn Backend>,
-    local: Arc<LocalBackend>,
+    lock_controller: Arc<dyn LockController>,
     session: Option<Arc<dyn BackendSession>>,
 }
 
 impl DaemonState {
-    /// Wrap a backend (for resolution), the local backend (for
+    /// Wrap a backend (for resolution), a lock controller (for
     /// lock/unlock) and an optional backend session handle as shared
     /// daemon state.
     ///
     /// Three parameters rather than one because they answer different
-    /// questions today — see the struct's own doc comment. Callers other
-    /// than [`open_default_state`] will typically pass the same
-    /// concrete backend upcast for `backend`/`local`, and `None` for
-    /// `session` unless that backend has its own authentication concept.
+    /// questions today — see the struct's own doc comment. The local
+    /// backend passes the same concrete value upcast for `backend`/
+    /// `lock_controller`, and `None` for `session`; a backend with its
+    /// own session (1Password) passes [`AlwaysUnlocked`] for
+    /// `lock_controller` and `Some(...)` for `session`.
     #[must_use]
     pub fn new(
         backend: Arc<dyn Backend>,
-        local: Arc<LocalBackend>,
+        lock_controller: Arc<dyn LockController>,
         session: Option<Arc<dyn BackendSession>>,
     ) -> Self {
         Self {
             backend,
-            local,
+            lock_controller,
             session,
         }
     }
@@ -97,7 +149,7 @@ impl DaemonState {
     /// [`secrets_core::dbus::STATUS_UNLOCKED`].
     #[must_use]
     pub fn status(&self) -> &'static str {
-        if self.local.is_unlocked() {
+        if self.lock_controller.is_unlocked() {
             secrets_core::dbus::STATUS_UNLOCKED
         } else {
             secrets_core::dbus::STATUS_LOCKED
@@ -107,21 +159,24 @@ impl DaemonState {
     /// Whether the store is currently unlocked.
     #[must_use]
     pub fn is_unlocked(&self) -> bool {
-        self.local.is_unlocked()
+        self.lock_controller.is_unlocked()
     }
 
-    /// Unlock (or, on first run, initialize) the store.
+    /// Unlock (or, for `LocalBackend`, on first run, initialize) the
+    /// store. A no-op for backends with no daemon-wide lock of their own
+    /// — see [`LockController`]/[`AlwaysUnlocked`].
     ///
     /// # Errors
     ///
-    /// See [`LocalBackend::unlock`].
+    /// See the active [`LockController`] implementation.
     pub fn unlock(&self, passphrase: &str) -> Result<()> {
-        self.local.unlock(passphrase)
+        self.lock_controller.unlock(passphrase)
     }
 
-    /// Lock the store, dropping the derived key from memory.
+    /// Lock the store, dropping any derived key from memory. A no-op for
+    /// backends with no daemon-wide lock of their own.
     pub fn lock(&self) {
-        self.local.lock();
+        self.lock_controller.lock();
     }
 
     /// List every vault name. Available regardless of lock state.
@@ -210,20 +265,47 @@ impl DaemonState {
     }
 }
 
-/// Open the backend at the standard XDG data path.
+/// Open the configured backend (see [`crate::config::Config`]) and wrap
+/// it as shared daemon state. Exactly one backend is active — no
+/// multi-backend routing (ADR-0008).
 ///
 /// # Errors
 ///
-/// Returns [`DaemonError`] if the path cannot be resolved or the existing
-/// vault file cannot be parsed.
+/// Returns [`DaemonError`] if the config file exists but cannot be
+/// parsed, if `[backend] type = "1password"` is missing a required
+/// field, if the local vault file's path cannot be resolved or it
+/// cannot be parsed, or if the configured backend fails to start (e.g.
+/// 1Password Desktop's native library cannot be loaded).
 pub fn open_default_state() -> Result<DaemonState> {
-    let path = crate::paths::vault_file()?;
-    let local = Arc::new(LocalBackend::open(path)?);
-    let backend: Arc<dyn Backend> = local.clone();
-    // The local backend has no session concept of its own — its "unlock"
-    // already is the daemon-wide lock, so there is nothing for
-    // `check_backend_session` to consult here.
-    Ok(DaemonState::new(backend, local, None))
+    match crate::config::Config::load()?.backend {
+        crate::config::BackendKind::Local => {
+            let path = crate::paths::vault_file()?;
+            let local = Arc::new(LocalBackend::open(path)?);
+            let backend: Arc<dyn Backend> = local.clone();
+            let lock_controller: Arc<dyn LockController> = local;
+            // The local backend has no session concept of its own — its
+            // "unlock" already is the daemon-wide lock, so there is
+            // nothing for `check_backend_session` to consult here.
+            Ok(DaemonState::new(backend, lock_controller, None))
+        }
+        crate::config::BackendKind::OnePassword { account_name } => {
+            let one_password = Arc::new(
+                crate::backend::onepassword::OnePasswordBackend::open(account_name)
+                    .map_err(|error| DaemonError::BackendUnavailable(error.to_string()))?,
+            );
+            let backend: Arc<dyn Backend> = one_password.clone();
+            let session: Arc<dyn BackendSession> = one_password;
+            // 1Password Desktop has no daemon-wide passphrase lock of its
+            // own — its own approval/session flow (`BackendSession`,
+            // ADR-0011) does the real gating instead. See
+            // `LockController`/`AlwaysUnlocked`'s own doc comments.
+            Ok(DaemonState::new(
+                backend,
+                Arc::new(AlwaysUnlocked),
+                Some(session),
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -234,14 +316,15 @@ mod tests {
 
     /// Builds a `DaemonState` the same way `open_default_state` does,
     /// against a throwaway vault file, so these tests exercise the exact
-    /// `Arc<dyn Backend>` + `Arc<LocalBackend>` wiring production code
-    /// uses. No backend session (matches the local backend, which has
-    /// none).
+    /// `Arc<dyn Backend>` + `Arc<dyn LockController>` wiring production
+    /// code uses. No backend session (matches the local backend, which
+    /// has none).
     fn state_over_fresh_vault() -> (tempfile::TempDir, DaemonState) {
         let dir = tempdir().unwrap();
         let local = Arc::new(LocalBackend::open(dir.path().join("vault.toml")).unwrap());
         let backend: Arc<dyn Backend> = local.clone();
-        (dir, DaemonState::new(backend, local, None))
+        let lock_controller: Arc<dyn LockController> = local;
+        (dir, DaemonState::new(backend, lock_controller, None))
     }
 
     /// A fixture [`BackendSession`] whose reported status is set by the
@@ -261,8 +344,24 @@ mod tests {
         let dir = tempdir().unwrap();
         let local = Arc::new(LocalBackend::open(dir.path().join("vault.toml")).unwrap());
         let backend: Arc<dyn Backend> = local.clone();
+        let lock_controller: Arc<dyn LockController> = local;
         let session: Arc<dyn BackendSession> = Arc::new(FixedSession(status));
-        (dir, DaemonState::new(backend, local, Some(session)))
+        (
+            dir,
+            DaemonState::new(backend, lock_controller, Some(session)),
+        )
+    }
+
+    #[test]
+    fn always_unlocked_reports_unlocked_and_ignores_lock_unlock_calls() {
+        // Confirms the documented contract directly: AlwaysUnlocked is a
+        // deliberate no-op, not a bug waiting to be noticed.
+        let controller = AlwaysUnlocked;
+        assert!(controller.is_unlocked());
+        controller.unlock("anything").unwrap();
+        assert!(controller.is_unlocked());
+        controller.lock();
+        assert!(controller.is_unlocked());
     }
 
     #[test]
