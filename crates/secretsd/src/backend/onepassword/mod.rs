@@ -14,6 +14,7 @@
 
 pub mod ffi;
 pub mod ipc;
+pub mod session;
 
 #[cfg(test)]
 pub(crate) mod test_support;
