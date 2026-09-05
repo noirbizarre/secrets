@@ -4,6 +4,17 @@
 //! contract. It knows nothing about D-Bus, sessions, or locking — those are
 //! `secretsd`'s job, layered on top by checking lock state before ever
 //! constructing a `Resolver` call.
+//!
+//! [`Resolver::resolve`] here and `secretsd::state::DaemonState::
+//! validate_reference` are deliberately named differently despite sounding
+//! similar: this `resolve` *is* real value resolution (it returns the
+//! field's [`SecretValue`]); `validate_reference` is an existence check
+//! that confirms a `secret://` reference names something real without
+//! reading its value at all (exposed over D-Bus as `Manager.Resolve` —
+//! see `docs/dbus/secrets-manager.md`). Do not reuse this module's
+//! `resolve` name for that check; the two operations are not the same
+//! thing and a future backend author reading only one of these files
+//! should not have to guess which "resolve" they are looking at.
 
 use crate::backend::Backend;
 use crate::error::Result;

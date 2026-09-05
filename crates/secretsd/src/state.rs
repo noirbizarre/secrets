@@ -146,19 +146,22 @@ impl DaemonState {
     /// Validate that a `secret://` reference names an existing vault, item
     /// and field, without reading the field's value.
     ///
-    /// Deliberately distinct from [`secrets_core::Resolver::resolve`],
-    /// which *does* return the value: this is an existence check only,
-    /// exposed over D-Bus as `Manager.Resolve` (see
-    /// `docs/dbus/secrets-manager.md`). A backend's own native reference
-    /// format (e.g. a future `op://...` internal encoding) never appears
-    /// in this method's output or errors — only the `secret://` form the
-    /// caller supplied.
+    /// Named `validate_reference`, not `resolve`, on purpose: this is an
+    /// existence check only, exposed over D-Bus as `Manager.Resolve` (see
+    /// `docs/dbus/secrets-manager.md` — the *wire* method name stays
+    /// `Resolve` for compatibility with existing clients; only this
+    /// internal Rust name changes). Deliberately distinct from
+    /// [`secrets_core::Resolver::resolve`], which *does* return the
+    /// value. A backend's own native reference format (e.g. a future
+    /// `op://...` internal encoding a 1Password backend might use) never
+    /// appears in this method's output or errors — only the `secret://`
+    /// form the caller supplied, echoed back canonicalised.
     ///
     /// # Errors
     ///
     /// Returns [`CoreError::VaultLocked`] if the store is locked, or
     /// [`CoreError::NotFound`] if the reference does not resolve.
-    pub fn resolve(&self, uri: &SecretUri) -> std::result::Result<(), CoreError> {
+    pub fn validate_reference(&self, uri: &SecretUri) -> std::result::Result<(), CoreError> {
         if !self.is_unlocked() {
             return Err(CoreError::VaultLocked {
                 vault: uri.vault().to_string(),
@@ -287,16 +290,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_validates_without_returning_the_value() {
+    fn validate_reference_confirms_existence_without_returning_the_value() {
         let (_dir, state) = state_over_fresh_vault();
         state.unlock("test passphrase").unwrap();
 
         let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
-        // `resolve` succeeds but its `Ok` carries no value to expose.
-        state.resolve(&uri).unwrap();
+        // Succeeds but its `Ok` carries no value to expose — unlike `get`.
+        state.validate_reference(&uri).unwrap();
 
         let missing = SecretUri::parse("secret://Personal/GitHub/does-not-exist").unwrap();
-        let error = state.resolve(&missing).unwrap_err();
+        let error = state.validate_reference(&missing).unwrap_err();
         assert!(matches!(error, CoreError::NotFound { .. }));
     }
 
@@ -330,7 +333,7 @@ mod tests {
         state.unlock("test passphrase").unwrap();
 
         let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
-        let error = state.resolve(&uri).unwrap_err();
+        let error = state.validate_reference(&uri).unwrap_err();
         assert!(matches!(error, CoreError::BackendRequiresAuthentication(_)));
     }
 
@@ -364,6 +367,6 @@ mod tests {
 
         let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
         assert!(state.get(&uri).is_ok());
-        assert!(state.resolve(&uri).is_ok());
+        assert!(state.validate_reference(&uri).is_ok());
     }
 }

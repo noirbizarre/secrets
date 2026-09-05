@@ -72,7 +72,7 @@ impl ManagerIface {
     fn resolve(&self, uri: &str) -> Result<String, ManagerError> {
         let parsed =
             SecretUri::parse(uri).map_err(|error| ManagerError::InvalidUri(error.to_string()))?;
-        self.state.resolve(&parsed)?;
+        self.state.validate_reference(&parsed)?;
         Ok(parsed.to_string())
     }
 
