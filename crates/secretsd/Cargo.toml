@@ -27,6 +27,7 @@ path = "src/main.rs"
 aes-gcm = "0.11.1"
 argon2 = "0.6.0"
 base64 = "0.23.1"
+libloading = "0.8.9"
 miette = { version = "7.6.0", features = ["fancy"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 secrets-core = { version = "0.1.0", path = "../secrets-core" }
