@@ -25,6 +25,7 @@ nav = [
     { "Overview" = "architecture/overview.md" },
     { "Future clients" = "architecture/clients.md" },
     { "1Password Desktop integration" = "architecture/1password-integration.md" },
+    { "1Password Desktop POC results" = "architecture/1password-poc-results.md" },
   ] },
   { "secret:// URI scheme" = "secret-uri.md" },
   { "D-Bus API" = [
