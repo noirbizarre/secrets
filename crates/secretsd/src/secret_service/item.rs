@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use secrets_core::{Backend, ItemPath};
+use secrets_core::ItemPath;
 
 use super::Secret;
 use crate::state::DaemonState;

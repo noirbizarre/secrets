@@ -13,6 +13,7 @@
 //! logic.
 
 mod backend;
+mod config;
 mod crypto;
 mod error;
 mod manager;

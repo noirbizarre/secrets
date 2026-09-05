@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use secrets_core::{Backend, FieldKind};
+use secrets_core::FieldKind;
 use signature::Signer;
 use ssh_agent_lib::agent::{Session, listen};
 use ssh_agent_lib::error::AgentError;

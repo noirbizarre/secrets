@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use secrets_core::Backend;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 use super::{PROMPT_PATH, SESSION_PATH, Secret, Topology, collection_path};
