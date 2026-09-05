@@ -169,14 +169,31 @@ fn envelope_request(kind: &'static str, account_name: &str, payload: &impl Seria
     Request(bytes)
 }
 
+/// The `payload` field's encoding: normally base64 text (matching Go's
+/// `[]byte` auto-encoding through `encoding/json`, and every successful
+/// response observed against the real Desktop app), but confirmed, in
+/// practice, to sometimes be a raw JSON array of byte values instead —
+/// observed on an internal-error response path (an early failure before
+/// the normal response constructor ever runs; see "Confirmed wire
+/// protocol" in `docs/architecture/1password-integration.md`). Handling
+/// both is not defensive guessing: both shapes were seen from the real
+/// library, not merely anticipated.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PayloadEncoding {
+    Base64(String),
+    Raw(Vec<u8>),
+}
+
 #[derive(Deserialize)]
 struct RawResponseEnvelope {
     success: bool,
-    payload: String,
+    payload: PayloadEncoding,
 }
 
-/// Decode a response envelope's outer JSON and base64, returning the
-/// inner payload's raw bytes on success.
+/// Decode a response envelope's outer JSON and its payload encoding
+/// (see [`PayloadEncoding`]), returning the inner payload's raw bytes on
+/// success.
 ///
 /// # Errors
 ///
@@ -187,9 +204,12 @@ struct RawResponseEnvelope {
 fn decode_response(bytes: &[u8]) -> Result<Vec<u8>, ProtocolError> {
     let raw: RawResponseEnvelope =
         serde_json::from_slice(bytes).map_err(|_| ProtocolError::InvalidEnvelope)?;
-    let decoded = BASE64
-        .decode(&raw.payload)
-        .map_err(|_| ProtocolError::InvalidBase64)?;
+    let decoded = match raw.payload {
+        PayloadEncoding::Base64(text) => BASE64
+            .decode(&text)
+            .map_err(|_| ProtocolError::InvalidBase64)?,
+        PayloadEncoding::Raw(bytes) => bytes,
+    };
     if raw.success {
         Ok(decoded)
     } else {
@@ -308,6 +328,25 @@ mod tests {
 
         let error = parse_client_id(&bytes).unwrap_err();
         assert!(matches!(error, ProtocolError::Failure(msg) if msg.contains("account_name")));
+    }
+
+    #[test]
+    fn a_failure_response_with_a_raw_byte_array_payload_still_parses() {
+        // Confirmed against the real Desktop app, not a hypothetical:
+        // an internal-error response path emits `payload` as a raw JSON
+        // array of byte values rather than base64 text (see the module
+        // doc's `PayloadEncoding`). A parser that only accepted base64
+        // would report a generic "invalid envelope" instead of this
+        // real, useful diagnostic text.
+        let message = b"Failed to create delegated session".to_vec();
+        let envelope = serde_json::json!({
+            "success": false,
+            "payload": message,
+        });
+        let bytes = serde_json::to_vec(&envelope).unwrap();
+
+        let error = parse_client_id(&bytes).unwrap_err();
+        assert!(matches!(error, ProtocolError::Failure(msg) if msg.contains("delegated session")));
     }
 
     #[test]

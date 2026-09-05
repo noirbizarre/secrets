@@ -347,6 +347,14 @@ separate from `ipc.rs`'s deliberately protocol-agnostic `Request`/
 `Response`, so the byte-level IPC primitive still does not need to know
 what a legitimate message looks like — only `protocol.rs` does.
 
+One detail confirmed only by running the real Step 8 probe, not by
+reading the Go SDK's source: the outer envelope's `payload` field is
+**not always** base64 text. On at least one internal-error response
+path, the real Desktop app returned `payload` as a raw JSON array of
+byte values instead — plausibly an early failure path that bypasses
+whatever wraps normal responses in base64. `protocol.rs` decodes either
+shape. See a forthcoming "POC results" document for the full run.
+
 ## Version compatibility
 
 Everything above was reverse-engineered from one specific `.so` build

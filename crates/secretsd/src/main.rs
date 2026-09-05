@@ -12,28 +12,18 @@
 //! `#[tokio::main]`, no executor to reason about for the daemon's core
 //! logic.
 
-mod backend;
-mod config;
-mod crypto;
-mod error;
-mod manager;
-mod paths;
-mod secret_service;
-mod ssh_agent;
-mod state;
-
 use std::sync::Arc;
 
 use secrets_core::dbus::{MANAGER_PATH, SERVICE_NAME};
-
-use error::DaemonError;
-use manager::ManagerIface;
-use secret_service::collection::CollectionIface;
-use secret_service::item::ItemIface;
-use secret_service::prompt::PromptIface;
-use secret_service::service::ServiceIface;
-use secret_service::session::SessionIface;
-use secret_service::{PROMPT_PATH, SERVICE_PATH, SESSION_PATH, collection_path};
+use secretsd::error::DaemonError;
+use secretsd::manager::ManagerIface;
+use secretsd::secret_service::collection::CollectionIface;
+use secretsd::secret_service::item::ItemIface;
+use secretsd::secret_service::prompt::PromptIface;
+use secretsd::secret_service::service::ServiceIface;
+use secretsd::secret_service::session::SessionIface;
+use secretsd::secret_service::{PROMPT_PATH, SERVICE_PATH, SESSION_PATH, collection_path};
+use secretsd::{paths, secret_service, ssh_agent, state};
 
 fn run() -> Result<(), DaemonError> {
     tracing_subscriber::fmt()
