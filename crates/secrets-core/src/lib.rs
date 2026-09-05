@@ -32,7 +32,7 @@ pub mod resolver;
 pub mod secret_value;
 pub mod uri;
 
-pub use backend::Backend;
+pub use backend::{Backend, BackendSession, BackendStatus};
 pub use error::{CoreError, Result};
 pub use model::{FieldKind, FieldMeta, Item, Vault};
 pub use resolver::Resolver;

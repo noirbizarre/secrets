@@ -49,6 +49,13 @@ pub enum CliError {
     #[diagnostic(code(secrets::cli::backend_unavailable))]
     BackendUnavailable(String),
 
+    /// The active backend has its own session/authentication requirement
+    /// that is not currently satisfied (distinct from `VaultLocked`: the
+    /// daemon itself may be unlocked).
+    #[error("{0}")]
+    #[diagnostic(code(secrets::cli::backend_requires_authentication))]
+    BackendRequiresAuthentication(String),
+
     /// A command whose structure exists for forward-compatibility, but
     /// whose behaviour is not yet implemented.
     #[error("`secrets {command}` is not implemented yet")]
@@ -90,6 +97,9 @@ impl From<ManagerError> for CliError {
             ManagerError::PermissionDenied(message) => Self::PermissionDenied(message),
             ManagerError::InvalidOperation(message) => Self::InvalidOperation(message),
             ManagerError::BackendUnavailable(message) => Self::BackendUnavailable(message),
+            ManagerError::BackendRequiresAuthentication(message) => {
+                Self::BackendRequiresAuthentication(message)
+            }
         }
     }
 }

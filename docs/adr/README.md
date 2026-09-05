@@ -37,3 +37,5 @@ by editing the old one. The history is the value.
   machine
 - [ADR-010](010-cli-as-thin-dbus-client.md) — The CLI as a thin D-Bus
   client only
+- [ADR-011](011-backend-session-and-authentication-state.md) — Backend
+  session and authentication state

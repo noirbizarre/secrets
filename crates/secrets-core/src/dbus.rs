@@ -110,6 +110,11 @@ pub enum ManagerError {
 
     /// The backend could not be reached.
     BackendUnavailable(String),
+
+    /// The active backend has its own session/authentication concept
+    /// (see [`crate::backend::BackendSession`]) and it is missing,
+    /// expired, or otherwise unsatisfied.
+    BackendRequiresAuthentication(String),
 }
 
 impl From<CoreError> for ManagerError {
@@ -125,6 +130,9 @@ impl From<CoreError> for ManagerError {
             CoreError::PermissionDenied { .. } => Self::PermissionDenied(message),
             CoreError::InvalidOperation(_) => Self::InvalidOperation(message),
             CoreError::BackendUnavailable(_) => Self::BackendUnavailable(message),
+            CoreError::BackendRequiresAuthentication(_) => {
+                Self::BackendRequiresAuthentication(message)
+            }
         }
     }
 }
@@ -152,5 +160,21 @@ mod tests {
         let error = CoreError::InvalidUri(UriError::EmptyVault);
         let mapped: ManagerError = error.into();
         assert!(matches!(mapped, ManagerError::InvalidUri(_)));
+    }
+
+    #[test]
+    fn a_backend_auth_requirement_maps_to_its_own_dbus_error_not_vault_locked() {
+        // Regression guard: a backend's own session requirement must stay
+        // distinguishable from the daemon's lock (ADR-0009) — a client
+        // that only knows to retry "unlock" would otherwise loop forever
+        // against a backend problem "unlock" cannot fix.
+        let error = CoreError::BackendRequiresAuthentication(
+            "1Password Desktop session expired".to_string(),
+        );
+        let mapped: ManagerError = error.into();
+        assert!(matches!(
+            mapped,
+            ManagerError::BackendRequiresAuthentication(msg) if msg.contains("1Password")
+        ));
     }
 }

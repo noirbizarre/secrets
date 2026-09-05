@@ -66,6 +66,18 @@ pub enum CoreError {
     /// instance.
     #[error("backend unavailable: {0}")]
     BackendUnavailable(String),
+
+    /// The daemon is unlocked, but the active backend has its own,
+    /// separate authentication/session concept (see
+    /// [`crate::backend::BackendSession`]) and that session is missing,
+    /// expired, or otherwise requires the caller — or an out-of-band flow
+    /// — to authenticate before this request can proceed.
+    ///
+    /// Distinct from [`CoreError::VaultLocked`], which is about the
+    /// daemon's own lock, not a backend's session; never carries a
+    /// credential or session token, only a description.
+    #[error("backend requires authentication: {0}")]
+    BackendRequiresAuthentication(String),
 }
 
 /// The crate's result alias.

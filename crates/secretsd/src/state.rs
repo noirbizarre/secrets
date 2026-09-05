@@ -7,7 +7,10 @@
 
 use std::sync::Arc;
 
-use secrets_core::{Backend, CoreError, Item, Resolver, SecretUri, SecretValue, Vault};
+use secrets_core::{
+    Backend, BackendSession, BackendStatus, CoreError, Item, Resolver, SecretUri, SecretValue,
+    Vault,
+};
 
 use crate::backend::local::LocalBackend;
 use crate::error::Result;
@@ -20,25 +23,73 @@ use crate::error::Result;
 /// lock/unlock/status: those three operations are not part of the
 /// `Backend` trait (they vary too much between backend shapes to force
 /// into one signature yet), and the local backend remains the only
-/// implementation of them for now. See ADR-0011 for the follow-up that
-/// generalizes an *external* backend's own authentication/session state
-/// — distinct from this daemon-wide lock.
+/// implementation of them for now.
+///
+/// `session` is the daemon-wide lock's conceptual opposite number: an
+/// *external* backend's own authentication/session state (see
+/// [`BackendSession`], ADR-0011), distinct from `local`'s lock/unlock.
+/// `None` for backends with no such concept — the local backend never
+/// sets this, since its "unlock" already is the daemon lock.
 pub struct DaemonState {
     backend: Arc<dyn Backend>,
     local: Arc<LocalBackend>,
+    session: Option<Arc<dyn BackendSession>>,
 }
 
 impl DaemonState {
-    /// Wrap a backend (for resolution) and the local backend (for
-    /// lock/unlock) as shared daemon state.
+    /// Wrap a backend (for resolution), the local backend (for
+    /// lock/unlock) and an optional backend session handle as shared
+    /// daemon state.
     ///
-    /// Two parameters rather than one because they answer different
+    /// Three parameters rather than one because they answer different
     /// questions today — see the struct's own doc comment. Callers other
     /// than [`open_default_state`] will typically pass the same
-    /// concrete backend upcast twice, as it does.
+    /// concrete backend upcast for `backend`/`local`, and `None` for
+    /// `session` unless that backend has its own authentication concept.
     #[must_use]
-    pub fn new(backend: Arc<dyn Backend>, local: Arc<LocalBackend>) -> Self {
-        Self { backend, local }
+    pub fn new(
+        backend: Arc<dyn Backend>,
+        local: Arc<LocalBackend>,
+        session: Option<Arc<dyn BackendSession>>,
+    ) -> Self {
+        Self {
+            backend,
+            local,
+            session,
+        }
+    }
+
+    /// Check the active backend's own session state, if it has one.
+    ///
+    /// Called in addition to (never instead of) the daemon lock check in
+    /// [`DaemonState::get`]/[`DaemonState::resolve`] — the two answer
+    /// different questions and neither substitutes for the other.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::BackendRequiresAuthentication`] if the backend
+    /// reports [`BackendStatus::RequiresAuthentication`] or
+    /// [`BackendStatus::SessionExpired`], or
+    /// [`CoreError::BackendUnavailable`] if it reports
+    /// [`BackendStatus::Unavailable`]. `None` (no session concept) and
+    /// [`BackendStatus::Available`]/[`BackendStatus::Authenticated`] both
+    /// pass.
+    fn check_backend_session(&self) -> std::result::Result<(), CoreError> {
+        let Some(session) = &self.session else {
+            return Ok(());
+        };
+        match session.backend_status() {
+            BackendStatus::Available | BackendStatus::Authenticated => Ok(()),
+            BackendStatus::RequiresAuthentication => Err(CoreError::BackendRequiresAuthentication(
+                "the backend has no active session; it must be authenticated before secrets can be read".to_string(),
+            )),
+            BackendStatus::SessionExpired => Err(CoreError::BackendRequiresAuthentication(
+                "the backend's session has expired and needs renewal".to_string(),
+            )),
+            BackendStatus::Unavailable => Err(CoreError::BackendUnavailable(
+                "the backend is not reachable".to_string(),
+            )),
+        }
     }
 
     /// `"locked"` or `"unlocked"`, matching
@@ -113,6 +164,7 @@ impl DaemonState {
                 vault: uri.vault().to_string(),
             });
         }
+        self.check_backend_session()?;
         let items = self.list_items(uri.vault())?;
         let exists = items.iter().any(|item| {
             item.path.segments() == uri.item().segments() && item.has_field(uri.field())
@@ -140,6 +192,7 @@ impl DaemonState {
                 vault: uri.vault().to_string(),
             });
         }
+        self.check_backend_session()?;
         Resolver::new(self.backend.as_ref()).resolve(uri)
     }
 
@@ -164,7 +217,10 @@ pub fn open_default_state() -> Result<DaemonState> {
     let path = crate::paths::vault_file()?;
     let local = Arc::new(LocalBackend::open(path)?);
     let backend: Arc<dyn Backend> = local.clone();
-    Ok(DaemonState::new(backend, local))
+    // The local backend has no session concept of its own — its "unlock"
+    // already is the daemon-wide lock, so there is nothing for
+    // `check_backend_session` to consult here.
+    Ok(DaemonState::new(backend, local, None))
 }
 
 #[cfg(test)]
@@ -176,12 +232,34 @@ mod tests {
     /// Builds a `DaemonState` the same way `open_default_state` does,
     /// against a throwaway vault file, so these tests exercise the exact
     /// `Arc<dyn Backend>` + `Arc<LocalBackend>` wiring production code
-    /// uses.
+    /// uses. No backend session (matches the local backend, which has
+    /// none).
     fn state_over_fresh_vault() -> (tempfile::TempDir, DaemonState) {
         let dir = tempdir().unwrap();
         let local = Arc::new(LocalBackend::open(dir.path().join("vault.toml")).unwrap());
         let backend: Arc<dyn Backend> = local.clone();
-        (dir, DaemonState::new(backend, local))
+        (dir, DaemonState::new(backend, local, None))
+    }
+
+    /// A fixture [`BackendSession`] whose reported status is set by the
+    /// test, so `check_backend_session`'s gating can be exercised without
+    /// a real external backend.
+    struct FixedSession(BackendStatus);
+
+    impl BackendSession for FixedSession {
+        fn backend_status(&self) -> BackendStatus {
+            self.0
+        }
+    }
+
+    /// Same as [`state_over_fresh_vault`], but with a backend session
+    /// fixture attached, reporting `status`.
+    fn state_with_backend_session(status: BackendStatus) -> (tempfile::TempDir, DaemonState) {
+        let dir = tempdir().unwrap();
+        let local = Arc::new(LocalBackend::open(dir.path().join("vault.toml")).unwrap());
+        let backend: Arc<dyn Backend> = local.clone();
+        let session: Arc<dyn BackendSession> = Arc::new(FixedSession(status));
+        (dir, DaemonState::new(backend, local, Some(session)))
     }
 
     #[test]
@@ -229,5 +307,63 @@ mod tests {
         let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
         let error = state.get(&uri).unwrap_err();
         assert!(matches!(error, CoreError::VaultLocked { .. }));
+    }
+
+    #[test]
+    fn a_backend_requiring_authentication_blocks_get_even_when_the_daemon_is_unlocked() {
+        // The daemon-wide lock and a backend's own session are different
+        // questions (ADR-0011): being unlocked must not be enough on its
+        // own when the active backend also has an unmet session
+        // requirement.
+        let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
+        state.unlock("test passphrase").unwrap();
+        assert!(state.is_unlocked());
+
+        let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
+        let error = state.get(&uri).unwrap_err();
+        assert!(matches!(error, CoreError::BackendRequiresAuthentication(_)));
+    }
+
+    #[test]
+    fn an_expired_backend_session_blocks_resolve_with_a_distinct_error_from_vault_locked() {
+        let (_dir, state) = state_with_backend_session(BackendStatus::SessionExpired);
+        state.unlock("test passphrase").unwrap();
+
+        let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
+        let error = state.resolve(&uri).unwrap_err();
+        assert!(matches!(error, CoreError::BackendRequiresAuthentication(_)));
+    }
+
+    #[test]
+    fn an_unavailable_backend_blocks_get_with_backend_unavailable() {
+        let (_dir, state) = state_with_backend_session(BackendStatus::Unavailable);
+        state.unlock("test passphrase").unwrap();
+
+        let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
+        let error = state.get(&uri).unwrap_err();
+        assert!(matches!(error, CoreError::BackendUnavailable(_)));
+    }
+
+    #[test]
+    fn an_authenticated_backend_session_does_not_block_get() {
+        let (_dir, state) = state_with_backend_session(BackendStatus::Authenticated);
+        state.unlock("test passphrase").unwrap();
+
+        let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
+        let value = state.get(&uri).unwrap();
+        assert_eq!(value.expose_secret(), "correct horse battery staple");
+    }
+
+    #[test]
+    fn no_backend_session_at_all_behaves_exactly_as_before_step_2() {
+        // Regression guard for the local backend: `session` is `None`, so
+        // `check_backend_session` must be a no-op, never blocking a
+        // request the daemon lock alone already allows.
+        let (_dir, state) = state_over_fresh_vault();
+        state.unlock("test passphrase").unwrap();
+
+        let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
+        assert!(state.get(&uri).is_ok());
+        assert!(state.resolve(&uri).is_ok());
     }
 }
