@@ -31,7 +31,7 @@ clap = { version = "4.6.6", features = ["derive", "env", "wrap_help"] }
 console = "0.16.4"
 demand = "2.1.0"
 miette = { version = "7.6.0", features = ["fancy"] }
-secrets-core = { version = "0.1.0", path = "../secrets-core" }
+secrets-client = { version = "0.1.0", path = "../secrets-client" }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.20"
 toml = "1.1.4"

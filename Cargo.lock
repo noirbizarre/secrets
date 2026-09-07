@@ -1777,7 +1777,7 @@ dependencies = [
  "predicates",
  "pretty_assertions",
  "rstest",
- "secrets-core",
+ "secrets-client",
  "serde",
  "tempfile",
  "thiserror",

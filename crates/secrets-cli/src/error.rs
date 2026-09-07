@@ -1,7 +1,8 @@
 //! The CLI's own error type: connection failures and the D-Bus error names
-//! defined in `secrets_core::dbus`, translated into actionable messages.
+//! defined in `secrets_core::dbus` (re-exported as `secrets_client::Error`),
+//! translated into actionable messages.
 
-use secrets_core::dbus::ManagerError;
+use secrets_client::Error as ManagerError;
 
 /// Everything that can go wrong running a `secrets` command.
 ///

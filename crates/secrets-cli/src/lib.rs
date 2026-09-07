@@ -1,21 +1,22 @@
 //! `secrets-cli` — the `secrets` command's library surface.
 //!
-//! Everything here is a thin D-Bus client (see [`client::Client`]): no
-//! vault or session state is held or duplicated locally. `secretsd` is the
-//! sole authority; this crate only formats requests and responses.
+//! Everything here is a thin wrapper over
+//! [`secrets_client::SecretsClient`]: no vault or session state is held or
+//! duplicated locally. `secretsd` is the sole authority; this crate only
+//! parses arguments, calls the client library, and formats responses. See
+//! ADR-010.
 #![warn(missing_docs)]
 // See secrets-core's lib.rs for why: a diagnostic that says what to do
 // costs more bytes than clippy's threshold, and is worth it.
 #![allow(clippy::result_large_err)]
 
 pub mod cli;
-pub mod client;
 pub mod config;
 pub mod error;
 
 use cli::Command;
-use client::Client;
 use error::{CliError, Result};
+use secrets_client::SecretsClient as Client;
 
 /// Run a parsed subcommand to completion, printing its output.
 ///
