@@ -14,10 +14,13 @@ flowchart TB
         st[secret-tool / libsecret clients]
     end
 
-    subgraph Future
-        gtk[secrets-gtk]
-        browser[secrets-browser]
+    subgraph ext["External repositories"]
+        gtk["GD Secrets"]
+        tui[secrets-tui]
+        browser[browser extensions]
     end
+
+    client[[secrets-client]]
 
     subgraph secretsd
         direction TB
@@ -33,9 +36,11 @@ flowchart TB
     onepassword[(1Password Desktop<br/>native IPC)]
     future[(Vaultwarden / Bitwarden /<br/>pass / gopass / passage)]
 
-    cli -- D-Bus --> manager
-    gtk -. D-Bus .-> manager
+    cli --> client
+    gtk -. secrets-client or D-Bus .-> client
+    tui -. secrets-client or D-Bus .-> client
     browser -. Native Messaging .-> gtk
+    client -- D-Bus --> manager
     ssh -- SSH agent protocol --> agent
     st -- D-Bus --> ss
 
@@ -91,11 +96,14 @@ flowchart TB
 See [ADR-003](../adr/003-workspace-and-crate-boundaries.md) for the
 reasoning; in short:
 
-| Crate                | Role                                             |
-| --------------------- | ------------------------------------------------ |
-| `crates/secrets-core` | Shared library: URI parsing, model, backend trait, D-Bus definitions |
-| `crates/secretsd`     | The daemon binary                                |
-| `crates/secrets-cli`  | The `secrets` CLI binary                         |
+| Crate                   | Role                                             |
+| ------------------------ | ------------------------------------------------ |
+| `crates/secrets-core`   | Domain/core library: URI parsing, model, backend trait, D-Bus definitions |
+| `crates/secrets-client` | The public Rust client library for the D-Bus protocol |
+| `crates/secretsd`       | The daemon binary                                |
+| `crates/secrets-cli`    | The `secrets` CLI binary                         |
 
-Dependencies point one way: `secretsd` and `secrets-cli` both depend on
-`secrets-core`; neither depends on the other.
+Dependencies point one way: `secretsd` depends on `secrets-core` directly;
+`secrets-cli` depends on `secrets-client`, which itself depends on
+`secrets-core`. `secrets-client` never depends on `secretsd`, and
+`secretsd` never depends on either client crate.

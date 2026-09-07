@@ -34,42 +34,74 @@ replaceable; the interface is not. Secrets is not another password-manager
 UI — it is the plumbing other tools use to reach one.
 
 ```mermaid
-flowchart LR
-    subgraph Clients
-        cli[secrets CLI]
-        gtk["GD Secrets (external)"]
-        browser["browser extensions (external)"]
-        ssh[OpenSSH ssh / ssh-add]
+flowchart TB
+    subgraph apps["Applications"]
+        over[Over]
+        gtk["GD Secrets"]
+        tui[secrets-tui]
     end
+    cli[secrets CLI]
+    client[[secrets-client]]
+    dbus{{D-Bus}}
+    ssh[OpenSSH ssh / ssh-add]
+    stclients[secret-tool / libsecret clients]
 
     subgraph secretsd
         manager["org.secrets.Manager"]
         secretservice["org.freedesktop.Secret.*\n(compatibility)"]
         agent[SSH agent socket]
-        resolver[secret:// resolver]
         backend[(Backend)]
     end
 
-    cli -- D-Bus --> manager
-    gtk -- D-Bus --> manager
-    browser -- Native Messaging --> gtk
+    over --> client
+    gtk --> client
+    tui --> client
+    cli --> client
+    client --> dbus --> manager
     ssh -- SSH agent protocol --> agent
+    stclients -- D-Bus --> secretservice
 
-    manager --> resolver
-    secretservice --> resolver
-    agent --> resolver
-    resolver --> backend
+    manager --> backend
+    secretservice --> backend
+    agent --> backend
 ```
 
-## `secretsd` and `secrets`
+## The Secrets ecosystem
 
-- **`secretsd`** is a user systemd service. It owns the secret store,
-  session/lock state, and speaks three protocols on behalf of everything
-  else: the native `org.secrets.Manager` D-Bus API, the
-  [Secret Service](https://specifications.freedesktop.org/secret-service/)
-  D-Bus compatibility interfaces, and the standard SSH agent protocol.
-- **`secrets`** is the CLI: a thin client that never holds its own vault or
-  session state, only D-Bus calls into `secretsd`.
+Secrets is not one binary — it is a small ecosystem, all in this
+repository except the applications on top:
+
+| Crate                          | Role                                                    |
+| ------------------------------- | -------------------------------------------------------- |
+| `secretsd`                      | The daemon/service: owns the secret store and session/lock state |
+| `secrets`                       | The CLI: a thin client, no vault or session state of its own |
+| `secrets-core`                  | The domain library: `secret://` parsing, model, backend contract |
+| `secrets-client`                | The public Rust client library for the D-Bus protocol   |
+| D-Bus (`org.secrets.*`)         | The protocol — the stable contract between `secretsd` and every client |
+
+`GD Secrets` (a GTK application), `secrets-tui`, and browser extensions are
+**separate repositories** that consume `secrets-client` or the D-Bus
+protocol directly — not workspace members of this one. See
+[`docs/architecture/external-clients.md`](docs/architecture/external-clients.md).
+A non-Rust application does not need `secrets-client` either: it can speak
+`org.secrets.Manager` over D-Bus directly, with any D-Bus library — see
+[`docs/dbus/README.md`](docs/dbus/README.md).
+
+`secrets` (the CLI) is itself just one more client, no more privileged
+than any other:
+
+```text
+secrets CLI
+    |
+    v
+secrets-client
+    |
+    v
+  D-Bus
+    |
+    v
+ secretsd
+```
 
 Secrets are addressed by a `secret://<vault>/<item>/<field>` URI — see
 [`docs/secret-uri.md`](docs/secret-uri.md). That scheme is the *resource
@@ -131,6 +163,7 @@ age-encrypted files on disk) are the remaining tracked candidates — see
 - [`secret://` URI scheme](docs/secret-uri.md)
 - [Architecture overview](docs/architecture/overview.md)
 - [External clients (GTK, TUI, browser)](docs/architecture/external-clients.md)
+- [The D-Bus protocol](docs/dbus/README.md)
 - [`org.secrets.Manager` D-Bus API](docs/dbus/secrets-manager.md)
 - [Secret Service compatibility](docs/dbus/secret-service.md)
 - [SSH agent](docs/dbus/ssh-agent.md)
