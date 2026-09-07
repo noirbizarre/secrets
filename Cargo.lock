@@ -1787,6 +1787,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "secrets-client"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest",
+ "secrets-core",
+ "zbus",
+]
+
+[[package]]
 name = "secrets-core"
 version = "0.1.0"
 dependencies = [
