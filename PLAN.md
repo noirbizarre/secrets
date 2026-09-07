@@ -34,6 +34,9 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 1.3 Add `crates/secrets-core`, `crates/secretsd`, `crates/secrets-cli`
       as workspace members
 - [x] 1.4 `systemd/secretsd.service` user unit
+- [x] 1.5 Add `crates/secrets-client` as a workspace member — the public
+      Rust client library, so future Rust applications depend on one
+      crate instead of reimplementing `secrets-cli`'s own D-Bus plumbing
 
 ## 2. Documentation
 
@@ -49,6 +52,8 @@ This file is plain markdown, not rendered by `rust.tpl`.
       (plain algorithm only for MVP)
 - [x] 2.7 `docs/dbus/ssh-agent.md`
 - [x] 2.8 `docs/security.md` — MVP security model and its limitations
+- [x] 2.9 `docs/dbus/README.md` — D-Bus protocol as the Secrets IPC
+      boundary, indexing the native/Secret-Service/SSH-agent protocol docs
 
 ## 3. Architecture Decision Records (`docs/adr/`)
 
@@ -58,9 +63,10 @@ This file is plain markdown, not rendered by `rust.tpl`.
       scheme: hierarchical item path, field as terminal segment,
       percent-encoding for escaping
 - [x] 3.3 [ADR-003](docs/adr/003-workspace-and-crate-boundaries.md) —
-      Workspace/crate boundaries: `secrets-core` / `secretsd` /
-      `secrets-cli` as three peer members of a native `rust.tpl` workspace
-      (see rust.tpl#8)
+      Workspace/crate boundaries: `secrets-core` (domain/model),
+      `secrets-client` (public Rust client library), `secretsd` (daemon),
+      `secrets` CLI, and the D-Bus protocol as its own first-class
+      boundary, in a native `rust.tpl` workspace (see rust.tpl#8)
 - [x] 3.4 [ADR-004](docs/adr/004-secret-service-compatibility-scope.md) —
       Secret Service compatibility scope (plain algorithm only for the MVP)
 - [x] 3.5 [ADR-005](docs/adr/005-native-manager-api-design.md) — Native
@@ -77,7 +83,7 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 3.10 [ADR-010](docs/adr/010-cli-as-thin-dbus-client.md) — CLI as a
       thin D-Bus client only, no independent state
 
-## 4. `secrets-core` (shared library)
+## 4. `secrets-core` (domain/core library)
 
 - [x] 4.1 `SecretUri` parser and typed representation (`uri.rs`)
 - [x] 4.2 Data model: `Vault` / `Item` / `FieldMeta` / `FieldKind`
@@ -85,7 +91,9 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 4.3 `Backend` trait (`backend.rs`)
 - [x] 4.4 `Resolver` (`resolver.rs`)
 - [x] 4.5 Shared D-Bus interface definitions (`Manager` proxy trait,
-      `ManagerError`) reusable by `secretsd` and `secrets-cli` (`dbus.rs`)
+      `ManagerError`) — the D-Bus protocol's source of truth, consumed by
+      `secretsd` (implements the interface) and `secrets-client` (proxies
+      it) (`dbus.rs`)
 - [x] 4.6 Error types (`CoreError`), mapped to D-Bus error names at the
       daemon boundary (`error.rs`, `dbus.rs`)
 - [x] 4.7 Unit tests: URI parsing, validation, escaping, resolution (27
@@ -113,8 +121,8 @@ This file is plain markdown, not rendered by `rust.tpl`.
       `unlock` / `status` (`cli.rs`, `lib.rs`)
 - [x] 6.2 Stub future commands: `inject` / `run` / `totp` (clap surface
       only, `CliError::NotYetImplemented`)
-- [x] 6.3 D-Bus client wiring — thin, no local vault/session state
-      (`client.rs`)
+- [x] 6.3 D-Bus client wiring — thin, no local vault/session state; via the
+      `secrets-client` dependency (§12), not an in-crate implementation
 - [x] 6.4 Interactive prompts via `demand` (unlock passphrase, masked)
 - [x] 6.5 Config loading: `~/.config/secrets/config.toml`, XDG, `toml`
       crate (`config.rs`)
@@ -174,8 +182,23 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 10.2 Release targets restricted to Linux (gnu + musl, x86_64 +
       aarch64)
 
-## 11. Future clients (documentation only for the MVP)
+## 11. External client repositories (documentation boundary only)
 
 - [x] 11.1 GD Secrets boundary doc (`docs/architecture/external-clients.md`)
 - [x] 11.2 `secrets-tui` / browser extensions native messaging boundary doc
       (`docs/architecture/external-clients.md`)
+
+## 12. `secrets-client` (public Rust client library)
+
+- [x] 12.1 Crate scaffold: `crates/secrets-client`, depends only on
+      `secrets-core` (never on `secretsd`)
+- [x] 12.2 `SecretsClient`: `connect` / `status` / `unlock` / `lock` /
+      `list_vaults` / `list_items` / `resolve` / `get`, blocking (mirrors
+      `ManagerProxyBlocking`; see ADR-005 on why no async runtime is
+      required)
+- [x] 12.3 `secrets-cli` depends on `secrets-client` instead of owning its
+      own D-Bus client
+- [ ] 12.4 [Future] Async variant and additional ergonomic API (e.g.
+      `SecretUri`-typed helpers) — the seam that lets a Rust application
+      such as Over integrate with Secrets natively, without implementing
+      its own D-Bus layer; not implemented in this task
