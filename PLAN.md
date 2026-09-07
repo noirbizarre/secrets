@@ -39,8 +39,9 @@ This file is plain markdown, not rendered by `rust.tpl`.
 
 - [x] 2.1 README: what/why/architecture/vision, Mermaid diagram
 - [x] 2.2 `docs/architecture/overview.md`
-- [x] 2.3 `docs/architecture/clients.md` — future `secrets-gtk` /
-      `secrets-browser` boundary (pure D-Bus clients, no owned state)
+- [x] 2.3 `docs/architecture/external-clients.md` — GD Secrets /
+      `secrets-tui` / browser extensions boundary (pure D-Bus clients, no
+      owned state)
 - [x] 2.4 `docs/secret-uri.md` — `secret://` scheme, resource reference vs.
       D-Bus as the IPC mechanism
 - [x] 2.5 `docs/dbus/secrets-manager.md` — `org.secrets.Manager`
@@ -175,6 +176,6 @@ This file is plain markdown, not rendered by `rust.tpl`.
 
 ## 11. Future clients (documentation only for the MVP)
 
-- [x] 11.1 `secrets-gtk` boundary doc (`docs/architecture/clients.md`)
-- [x] 11.2 `secrets-browser` / native messaging boundary doc
-      (`docs/architecture/clients.md`)
+- [x] 11.1 GD Secrets boundary doc (`docs/architecture/external-clients.md`)
+- [x] 11.2 `secrets-tui` / browser extensions native messaging boundary doc
+      (`docs/architecture/external-clients.md`)

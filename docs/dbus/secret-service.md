@@ -56,8 +56,8 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
   `NotSupported`. See ADR-004 for why.
 - **Interactive prompting.** The shared `Prompt` object immediately
   reports itself dismissed when `Prompt()` is called — there is no GUI
-  agent yet (that is `secrets-gtk`'s eventual job; see
-  [`docs/architecture/clients.md`](../architecture/clients.md)).
+  agent yet (that is a future UI client's job, e.g. GD Secrets; see
+  [`docs/architecture/external-clients.md`](../architecture/external-clients.md)).
   `Service.Unlock` therefore only reflects state `secrets unlock` already
   set; it cannot itself trigger a passphrase prompt.
 - **Dynamic topology.** Collections and items are registered once, at

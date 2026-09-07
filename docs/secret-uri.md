@@ -85,7 +85,8 @@ safe to log or display: a malformed reference cannot itself be a secret's
 ## Implementation
 
 Parsing, validation and canonical formatting all live in
-`crates/secrets-core/src/uri.rs`, reused by `secretsd` and `secrets-cli`
-(and, eventually, `secrets-gtk`/`secrets-browser`) rather than
-reimplemented per client. See its module documentation and test suite for
-the exhaustive set of cases covered.
+`crates/secrets-core/src/uri.rs`, reused by `secretsd`, `secrets-client`
+and `secrets-cli` — and, by extension, any application built on
+`secrets-client`, or any non-Rust client speaking the D-Bus protocol
+directly — rather than reimplemented per client. See its module
+documentation and test suite for the exhaustive set of cases covered.

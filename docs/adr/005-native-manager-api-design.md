@@ -9,19 +9,20 @@ Accepted
 The Secret Service compatibility layer (ADR-004) exists so *existing*
 tools keep working; it is not shaped the way a Secrets-aware client would
 choose to talk to `secretsd` if it did not need to imitate another
-specification. `secrets-cli` — and eventually `secrets-gtk` and the
-browser native messaging host — need an interface that speaks `secret://`
-references directly, distinguishes "the store is locked" from "this does
-not exist" with named errors, and can grow new capabilities (TOTP
-generation, SSH key metadata, ...) without breaking existing callers.
+specification. `secrets-cli` — and, via `secrets-client`, eventual
+external clients such as GD Secrets and a browser native messaging host —
+need an interface that speaks `secret://` references directly,
+distinguishes "the store is locked" from "this does not exist" with named
+errors, and can grow new capabilities (TOTP generation, SSH key metadata,
+...) without breaking existing callers.
 
 ## Decision
 
 A second, Secrets-owned interface: `org.secrets.Manager`, defined once in
 `secrets-core::dbus` via a plain (non-`async`) trait under
 `#[zbus::proxy]` — which generates both an async and a blocking proxy from
-the same declaration, so `secrets-cli` never needs an async runtime just to
-make a method call (see ADR-010).
+the same declaration, so `secrets-client` (and `secrets-cli` through it)
+never needs an async runtime just to make a method call (see ADR-010).
 
 Six methods for the MVP:
 

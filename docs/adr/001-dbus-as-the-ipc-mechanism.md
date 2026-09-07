@@ -7,9 +7,10 @@ Accepted
 ## Context
 
 `secretsd` needs to talk to clients that do not share its process:
-`secrets-cli` today, `secrets-gtk` and browser extensions eventually,
-possibly third-party tools later. Something has to carry method calls and
-errors between them.
+`secrets-cli` today, and — via `secrets-client` or the D-Bus protocol
+directly — separately maintained clients such as GD Secrets, `secrets-tui`
+and browser extensions eventually, possibly third-party tools later.
+Something has to carry method calls and errors between them.
 
 Options considered:
 
@@ -42,7 +43,8 @@ documentation or code.
 ## Consequences
 
 - Every client needs a D-Bus library, not a bespoke one — cheaper for the
-  ecosystem this project hopes to grow (GTK, browser, third-party tools).
+  ecosystem this project hopes to grow (GD Secrets, `secrets-tui`, browser
+  extensions, third-party tools).
 - `secretsd` is unreachable from outside the user's own login session,
   which is exactly the trust boundary a secret broker wants — D-Bus session
   bus peers are authenticated by the kernel via the connecting process's

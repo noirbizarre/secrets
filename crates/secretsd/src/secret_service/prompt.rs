@@ -2,7 +2,8 @@
 //!
 //! One shared instance answers every operation that would need a real
 //! interactive prompt, and immediately reports itself dismissed: the MVP
-//! has no GUI agent to prompt with (that is `secrets-gtk`'s eventual job).
+//! has no GUI agent to prompt with (that is a future UI client's job, e.g.
+//! GD Secrets — a separate repository, not part of this workspace).
 //! Callers that need to unlock or create a collection should use
 //! `secrets unlock` instead — see `docs/dbus/secret-service.md`.
 

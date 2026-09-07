@@ -79,11 +79,12 @@ flowchart TB
    Service compatibility interfaces
    ([ADR-004](../adr/004-secret-service-compatibility-scope.md)), and the
    SSH agent ([ADR-007](../adr/007-ssh-agent-implementation.md)).
-5. **Clients** — `secrets-cli` today
-   ([ADR-010](../adr/010-cli-as-thin-dbus-client.md)); `secrets-gtk` and a
-   browser native messaging host in the future (see
-   [clients.md](clients.md)); any Secret-Service-speaking application
-   (`secret-tool`, `libsecret` consumers) today, read-only.
+5. **Clients** — `secrets-cli` today, via `secrets-client`
+   ([ADR-010](../adr/010-cli-as-thin-dbus-client.md)); GD Secrets,
+   `secrets-tui` and browser native messaging hosts in the future, each a
+   separate repository (see [external-clients.md](external-clients.md));
+   any Secret-Service-speaking application (`secret-tool`, `libsecret`
+   consumers) today, read-only.
 
 ## Crates
 

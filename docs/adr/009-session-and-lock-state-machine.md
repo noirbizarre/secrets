@@ -6,12 +6,13 @@ Accepted
 
 ## Context
 
-Every client (the CLI today, GTK/browser/SSH agent eventually) needs to
-agree on whether secrets are currently readable, and that agreement has to
-live in exactly one place — `secretsd` — or two clients could observe
-contradictory answers (one client's `unlock` should be visible to every
-other client immediately, including a concurrently-running SSH connection
-attempt).
+Every client — the CLI and the SSH agent today; external GUI/TUI/browser
+clients (via `secrets-client` or the D-Bus protocol directly) eventually —
+needs to agree on whether secrets are currently readable, and that
+agreement has to live in exactly one place — `secretsd` — or two clients
+could observe contradictory answers (one client's `unlock` should be
+visible to every other client immediately, including a
+concurrently-running SSH connection attempt).
 
 ## Decision
 

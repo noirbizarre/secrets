@@ -7,9 +7,10 @@ Notes for anyone — human or otherwise — changing this repository.
 Local-first secret broker and secret manager for Linux desktops.
 
 `secretsd` is the one process that owns the secret store, session/lock
-state and access control. Every client — `secrets` (this repo), and
-eventually `secrets-gtk`/`secrets-browser` — is a thin D-Bus client with no
-vault or session state of its own. **`secret://` is the resource
+state and access control. Every client — `secrets` (this repo, via
+`secrets-client`), and eventually separately maintained clients such as GD
+Secrets, `secrets-tui`, and browser extensions — is a thin D-Bus client
+with no vault or session state of its own. **`secret://` is the resource
 reference; D-Bus is the transport** — do not conflate the two, and do not
 add a second IPC mechanism (see `docs/adr/001-dbus-as-the-ipc-mechanism.md`).
 This is not a password-manager UI: it is the plumbing other tools use to

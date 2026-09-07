@@ -39,7 +39,9 @@ never touches the vault file or bypasses the daemon.
 - Every lock-state and resolution bug has exactly one place to be fixed:
   `secretsd`. The CLI cannot have its own, different bug in the same
   logic, because it does not have its own copy of that logic.
-- Future clients (`secrets-gtk`, the browser native messaging host) follow
-  the same rule by construction: they will use the same
-  `org.secrets.Manager` proxy `secrets-core` already generates, not a
-  parallel implementation — see `docs/architecture/clients.md`.
+- Future external clients (GD Secrets, `secrets-tui`, a browser native
+  messaging host) follow the same rule by construction: Rust clients use
+  `secrets-client` (which wraps the same `org.secrets.Manager` proxy
+  `secrets-core` generates), and non-Rust clients speak the D-Bus protocol
+  directly — neither is a parallel implementation of resolution or
+  locking. See `docs/architecture/external-clients.md`.

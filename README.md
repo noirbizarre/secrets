@@ -37,8 +37,8 @@ UI — it is the plumbing other tools use to reach one.
 flowchart LR
     subgraph Clients
         cli[secrets CLI]
-        gtk["secrets-gtk (future)"]
-        browser["secrets-browser (future)"]
+        gtk["GD Secrets (external)"]
+        browser["browser extensions (external)"]
         ssh[OpenSSH ssh / ssh-add]
     end
 
@@ -103,9 +103,10 @@ SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/secrets/ssh-agent.sock ssh-add -L
 - Secret Service compatibility covers the "plain" session algorithm only.
 - `secrets inject`, `secrets run` and `secrets totp` exist as a CLI surface
   (see `secrets --help`) but are not implemented yet.
-- No GTK or browser client yet — see
-  [`docs/architecture/clients.md`](docs/architecture/clients.md) for how
-  they will attach once they exist.
+- No GTK, TUI or browser client yet — those are separate repositories, not
+  workspace members of this one. See
+  [`docs/architecture/external-clients.md`](docs/architecture/external-clients.md)
+  for the boundary they will attach behind once they exist.
 
 Full roadmap, tracked by category with checkboxes: [`PLAN.md`](PLAN.md).
 Design rationale for every non-obvious decision: [`docs/adr/`](docs/adr/).
@@ -129,7 +130,7 @@ age-encrypted files on disk) are the remaining tracked candidates — see
 
 - [`secret://` URI scheme](docs/secret-uri.md)
 - [Architecture overview](docs/architecture/overview.md)
-- [Future clients (GTK, browser)](docs/architecture/clients.md)
+- [External clients (GTK, TUI, browser)](docs/architecture/external-clients.md)
 - [`org.secrets.Manager` D-Bus API](docs/dbus/secrets-manager.md)
 - [Secret Service compatibility](docs/dbus/secret-service.md)
 - [SSH agent](docs/dbus/ssh-agent.md)

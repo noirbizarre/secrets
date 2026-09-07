@@ -23,7 +23,7 @@ nav = [
   { "Home" = "index.md" },
   { "Architecture" = [
     { "Overview" = "architecture/overview.md" },
-    { "Future clients" = "architecture/clients.md" },
+    { "External clients" = "architecture/external-clients.md" },
     { "1Password Desktop integration" = "architecture/1password-integration.md" },
     { "1Password Desktop POC results" = "architecture/1password-poc-results.md" },
   ] },

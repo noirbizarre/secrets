@@ -70,9 +70,9 @@ its password is.
 - **No per-application access control.** Any local process running as the
   same user can call `org.secrets.Manager` or read via the Secret Service
   compatibility layer while unlocked. A future prompt-based confirmation
-  (via `secrets-gtk`, see
-  [`docs/architecture/clients.md`](architecture/clients.md)) is the
-  intended fix — not present yet.
+  (via a future UI client such as GD Secrets, see
+  [`docs/architecture/external-clients.md`](architecture/external-clients.md))
+  is the intended fix — not present yet.
 - **Daemon-wide locking, not per-vault or per-secret.** Unlocking makes
   every vault readable. See
   [ADR-009](adr/009-session-and-lock-state-machine.md).

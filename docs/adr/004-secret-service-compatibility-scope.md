@@ -21,8 +21,9 @@ The specification's `Prompt` interface exists so a service can ask a
 *separate, trusted UI agent* to show a real interactive prompt (an unlock
 dialog, a "may this application read this secret?" confirmation) without
 the requesting client ever seeing the passphrase. This project has no such
-UI agent yet — that is `secrets-gtk`'s eventual job (see
-`docs/architecture/clients.md`).
+UI agent yet — that is the eventual job of a future, separately maintained
+UI client such as GD Secrets (see
+`docs/architecture/external-clients.md`).
 
 ## Decision
 
