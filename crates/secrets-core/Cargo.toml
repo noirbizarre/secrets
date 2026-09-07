@@ -1,8 +1,11 @@
-# secrets-core — shared model, URI parsing and backend contract.
+# secrets-core — the domain/core library: model, URI parsing and backend
+# contract.
 #
-# Consumed by both secretsd and secrets-cli. Nothing here knows a D-Bus
-# service or a terminal exists: this crate is pure domain logic plus the
-# wire-level types both binaries need to agree on.
+# Consumed directly by secretsd (implements Backend and the Manager D-Bus
+# interface) and by secrets-client (proxies that same interface). Nothing
+# here knows a D-Bus service, a terminal, or secretsd's own implementation
+# details exist: this crate is pure domain logic plus the wire-level types
+# every implementation and client need to agree on.
 
 [package]
 name = "secrets-core"

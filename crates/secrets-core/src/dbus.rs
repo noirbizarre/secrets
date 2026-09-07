@@ -30,8 +30,8 @@ pub const STATUS_UNLOCKED: &str = "unlocked";
 /// set) and every client uses the generated `ManagerProxyBlocking` /
 /// `ManagerProxy` to call it. Method names are plain (non-`async`) on
 /// purpose — the `#[zbus::proxy]` macro generates both a blocking and an
-/// async proxy from the same trait, so `secrets-cli` never needs an async
-/// runtime just to talk to the daemon.
+/// async proxy from the same trait, so `secrets-client` (and `secrets-cli`
+/// through it) never needs an async runtime just to talk to the daemon.
 ///
 /// Additions are additive: new methods or properties can be appended
 /// without breaking existing clients, since D-Bus dispatches by name. Do
