@@ -21,6 +21,8 @@ components and cross-compilation targets.
 | Command | What it does |
 |---|---|
 | `mise run build` | Build the binary |
+| `mise run cli` | Run the `secrets` CLI (forwards args) |
+| `mise run daemon` | Run `secretsd` in the foreground |
 | `mise run test` | Run the tests (accepts nextest selectors) |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |

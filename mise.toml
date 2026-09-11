@@ -220,3 +220,15 @@ git tpl diff --exit-code --stat
 #
 # Artwork tasks belong here rather than in `default` or `check`: they rewrite
 # committed binaries, so a routine run would dirty the working tree every time.
+
+[tasks.cli]
+description = "Run the secrets CLI (cargo run -p secrets-cli)"
+# `raw_args` so subcommands and flags (`status`, `unlock`, `get ...`) reach
+# the `secrets` binary instead of being parsed by mise itself.
+raw_args = true
+run = "cargo run --quiet -p secrets-cli --"
+
+[tasks.daemon]
+description = "Run secretsd in the foreground (cargo run -p secretsd)"
+run = "cargo run --quiet -p secretsd --"
+raw_args = true
