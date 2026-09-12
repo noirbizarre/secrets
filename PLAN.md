@@ -114,6 +114,16 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [ ] 5.7 Daemon integration tests (automated, in-process D-Bus) — covered
       so far only by a manual end-to-end pass over a private session bus
       (`dbus-run-session`); see §9.4
+- [x] 5.8 Also request the standard `org.freedesktop.secrets` bus name,
+      best-effort, and serve the `"default"` alias's collection at its
+      literal `/org/freedesktop/secrets/aliases/default` object path —
+      closes the gap where standard Secret Service clients (which
+      hardcode that bus name) could not reach `secretsd` at all (see
+      ADR-013, §3.11)
+- [ ] 5.9 Secret Service write support
+      (`CreateCollection`/`CreateItem`/`SetSecret`/`Delete`/`SetAlias`) —
+      deliberately deferred by ADR-004/ADR-013, tracked by
+      [issue #8](https://github.com/noirbizarre/secrets/issues/8)
 
 ## 6. `secrets-cli`
 

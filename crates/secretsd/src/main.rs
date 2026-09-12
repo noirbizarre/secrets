@@ -1,9 +1,12 @@
 //! `secretsd` — the Secrets user-session daemon.
 //!
 //! Owns the secret store, session/lock state and access control. Exposes
-//! `org.secrets.Manager` and the `org.freedesktop.Secret.*` compatibility
-//! interfaces over the D-Bus session bus, and a standard SSH agent socket.
-//! See `docs/architecture/overview.md` for the full picture.
+//! the standard `org.freedesktop.Secret.*` interfaces (the primary,
+//! interoperable contract) and the `org.secrets.*` extension namespace
+//! over the D-Bus session bus, plus a standard SSH agent socket. See
+//! `docs/architecture/overview.md` for the full picture and
+//! [ADR-013](../../../docs/adr/013-standard-secret-service-and-extension-namespace.md)
+//! for how the two D-Bus surfaces relate.
 //!
 //! Deliberately synchronous everywhere except the SSH agent (see
 //! `ssh_agent.rs`): the D-Bus connection uses `zbus`'s **blocking** API, so
@@ -22,8 +25,11 @@ use secretsd::secret_service::item::ItemIface;
 use secretsd::secret_service::prompt::PromptIface;
 use secretsd::secret_service::service::ServiceIface;
 use secretsd::secret_service::session::SessionIface;
-use secretsd::secret_service::{PROMPT_PATH, SERVICE_PATH, SESSION_PATH, collection_path};
+use secretsd::secret_service::{
+    ALIAS_DEFAULT_PATH, PROMPT_PATH, SERVICE_PATH, SESSION_PATH, collection_path,
+};
 use secretsd::{paths, secret_service, ssh_agent, state};
+use zbus::fdo::{RequestNameFlags, RequestNameReply};
 
 fn run() -> Result<(), DaemonError> {
     tracing_subscriber::fmt()
@@ -80,8 +86,64 @@ fn run() -> Result<(), DaemonError> {
         )?;
     }
 
-    let _connection = builder.name(SERVICE_NAME)?.build()?;
+    // The "default" alias's collection, additionally reachable at its own
+    // literal well-known path (spec §4/§12) — a client that hardcodes this
+    // path rather than calling `ReadAlias("default")` still reaches it.
+    // Only the first vault has one in this MVP (see `ServiceIface::read_alias`).
+    if let Some(default_vault) = topology.vaults.first() {
+        let items: Vec<_> = topology
+            .items
+            .iter()
+            .filter(|known| &known.vault == default_vault)
+            .cloned()
+            .collect();
+        builder = builder.serve_at(
+            ALIAS_DEFAULT_PATH,
+            CollectionIface::new(state.clone(), default_vault.clone(), items),
+        )?;
+    }
+
+    // `org.secrets.Daemon` is the only name this call chain is guaranteed
+    // to own — it is exclusively ours, so any failure here is fatal
+    // startup error (propagated by `?`, as before).
+    let connection = builder.name(SERVICE_NAME)?.build()?;
     tracing::info!("secretsd listening on the session bus as {SERVICE_NAME}");
+
+    // `org.freedesktop.secrets` is the name real Secret Service clients
+    // (`secret-tool`, `libsecret`'s `SECRET_SERVICE_BUS_NAME`) hardcode —
+    // requested *after* startup, best-effort, and deliberately without
+    // `AllowReplacement`/`ReplaceExisting`: a desktop session may already
+    // run GNOME Keyring or KWallet's `ksecretsd` owning it, and `secretsd`
+    // must neither fail to start nor steal the name from a legitimate
+    // provider over that. `DoNotQueue` makes the outcome immediate rather
+    // than waiting in a queue that may never be served.
+    match connection.request_name_with_flags(
+        secret_service::BUS_NAME,
+        RequestNameFlags::DoNotQueue.into(),
+    ) {
+        Ok(RequestNameReply::PrimaryOwner) => {
+            tracing::info!(
+                "also registered as {} for standard Secret Service clients",
+                secret_service::BUS_NAME
+            );
+        }
+        Ok(reply) => {
+            tracing::warn!(
+                "{} is already owned by another Secret Service provider ({reply}) — \
+                 likely GNOME Keyring or KWallet; standard clients that hardcode this bus \
+                 name will reach that service instead of secretsd. Point them at \
+                 {SERVICE_NAME} explicitly, or stop the other provider, to use secretsd's \
+                 Secret Service compatibility layer",
+                secret_service::BUS_NAME
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                "failed to request {}: {error} — secretsd remains reachable as {SERVICE_NAME}",
+                secret_service::BUS_NAME
+            );
+        }
+    }
 
     let socket_path = paths::ssh_agent_socket()?;
     let _ssh_agent = ssh_agent::spawn(state.clone(), socket_path);

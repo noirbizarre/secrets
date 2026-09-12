@@ -1,16 +1,23 @@
-//! `org.freedesktop.Secret.*` compatibility: a read-only view of the same
-//! vaults/items/fields the native `org.secrets.Manager` API exposes, shaped
-//! to satisfy existing Secret Service clients (`secret-tool`, `libsecret`
-//! consumers, browsers' native password managers).
+//! The standard [freedesktop Secret
+//! Service](https://specifications.freedesktop.org/secret-service/latest/)
+//! interfaces — the primary, interoperable contract `secretsd` exposes, so
+//! existing clients (`secret-tool`, `libsecret` consumers, browsers'
+//! native password managers) work against it unmodified. `org.secrets.*`
+//! (`crate::manager`) is the extension namespace layered on top, for
+//! `secret://`-shaped operations this standard has no way to express — see
+//! [ADR-013](../../../../docs/adr/013-standard-secret-service-and-extension-namespace.md).
 //!
-//! This is a compatibility API, not the primary one — see
-//! `docs/dbus/secret-service.md` for the full scope and its limitations,
-//! the most important being: **the object topology (which collections and
-//! items exist) is fixed at daemon startup.** If the vault file is created
-//! for the first time by `secrets unlock` while `secretsd` is already
-//! running, restart the daemon to pick up the new collections. The native
-//! `org.secrets.Manager` API (what `secrets-cli` uses) has no such
-//! limitation, since it reads live state on every call.
+//! See `docs/dbus/secret-service.md` for the full scope and its
+//! limitations, the most important being: **the object topology (which
+//! collections and items exist) is fixed at daemon startup.** If the vault
+//! file is created for the first time by `secrets unlock` while
+//! `secretsd` is already running, restart the daemon to pick up the new
+//! collections. `org.secrets.Manager` (what `secrets-cli` uses) has no
+//! such limitation, since it reads live state on every call.
+//!
+//! Read-only for now: `CreateCollection`/`CreateItem`/`SetSecret`/
+//! `Delete`/`SetAlias` all return `NotSupported` — tracked as follow-up
+//! work, not silently missing (see `PLAN.md` and the linked issue).
 //!
 //! Two more deliberate simplifications, both because the "plain" algorithm
 //! carries no per-session cryptographic state to keep distinct:
@@ -34,11 +41,33 @@ use zbus::zvariant::OwnedObjectPath;
 /// The root `org.freedesktop.Secret.Service` object path.
 pub const SERVICE_PATH: &str = "/org/freedesktop/secrets";
 
+/// The well-known bus name every standard Secret Service client (
+/// `secret-tool`, `libsecret`'s `SECRET_SERVICE_BUS_NAME`, GNOME
+/// Keyring/KWallet-compatible consumers) addresses directly, distinct
+/// from `secrets_core::dbus::SERVICE_NAME` (`org.secrets.Daemon`, which
+/// `secretsd` always owns).
+///
+/// Requested **best-effort**, after startup, not through
+/// `zbus::blocking::connection::Builder::name` — a desktop session may
+/// already run another Secret Service provider (GNOME Keyring, KWallet's
+/// `ksecretsd`) that owns this name first, and `secretsd` must keep
+/// serving `org.secrets.Daemon` and every object path regardless. See
+/// `main.rs` for the request and its fallback logging, and
+/// [ADR-013](../../../../docs/adr/013-standard-secret-service-and-extension-namespace.md).
+pub const BUS_NAME: &str = "org.freedesktop.secrets";
+
 /// The one shared, always-dismissed prompt object's path.
 pub const PROMPT_PATH: &str = "/org/freedesktop/secrets/prompt/unsupported";
 
 /// The one shared "plain"-algorithm session object's path.
 pub const SESSION_PATH: &str = "/org/freedesktop/secrets/session/shared";
+
+/// The literal well-known object path for the `"default"` alias's
+/// collection, in addition to its real `collection_path()` — see the
+/// specification's "Aliases" and "Object Paths" chapters. A client that
+/// hardcodes this path (rather than calling `ReadAlias("default")`) still
+/// reaches the same collection.
+pub const ALIAS_DEFAULT_PATH: &str = "/org/freedesktop/secrets/aliases/default";
 
 /// Turn an arbitrary name into a D-Bus object path segment: ASCII
 /// alphanumerics and underscore only, lowercased, never empty.
