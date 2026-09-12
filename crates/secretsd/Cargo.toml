@@ -50,6 +50,10 @@ zbus = "5.19.0"
 zeroize = { version = "1.9.0", features = ["derive"] }
 
 [dev-dependencies]
+# Only for `tests/support`: sending a real `SIGTERM` to the spawned
+# `secretsd` subprocess so the D-Bus integration harness can assert a
+# clean shutdown — `std::process::Child::kill()` only offers `SIGKILL`.
+libc = "0.2.189"
 pretty_assertions = "1.4.1"
 rstest = "0.26.1"
 tempfile = "3.27.0"

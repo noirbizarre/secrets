@@ -121,9 +121,11 @@ This file is plain markdown, not rendered by `rust.tpl`.
       AES-256-GCM, first-run demo seeding (`backend/local.rs`, `crypto.rs`)
 - [x] 5.6 SSH agent (`ssh-agent-lib`); identities unavailable while locked
       (`ssh_agent.rs`)
-- [ ] 5.7 Daemon integration tests (automated, in-process D-Bus) — covered
-      so far only by a manual end-to-end pass over a private session bus
-      (`dbus-run-session`); see §9.4
+- [x] 5.7 Daemon integration tests (automated) — a real `secretsd` binary
+      spawned on a private `dbus-daemon` session bus over an isolated
+      local-backend vault, driven through client-side proxies for
+      `Service`/`Collection`/`Item`/`Session`/`Prompt`
+      (`tests/secret_service.rs`, `tests/support/`); see §9.4
 - [x] 5.8 Also request the standard `org.freedesktop.secrets` bus name,
       best-effort, and serve the `"default"` alias's collection at its
       literal `/org/freedesktop/secrets/aliases/default` object path —
@@ -171,8 +173,10 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 8.1 Threat model / MVP limitations write-up (`docs/security.md`)
 - [x] 8.2 Tests asserting no secret value ever reaches logs or error
       output (`secrets_core::resolver::tests`,
-      `secrets_core::secret_value::tests`) — not yet extended to
-      `secretsd`/`secrets-cli`'s own log output specifically
+      `secrets_core::secret_value::tests`), extended to `secretsd`'s own
+      captured stdout/stderr across a full locked/unlock/get/lock D-Bus
+      session (`tests/secret_service.rs`'s `assert_no_secrets_leaked`) —
+      not yet extended to `secrets-cli`'s own log output specifically
 - [x] 8.3 Memory hygiene: `SecretValue`/`VaultKey` are
       `Zeroize`/`ZeroizeOnDrop`; documented `SIGKILL`/abort limitation in
       `docs/security.md`
@@ -181,15 +185,21 @@ This file is plain markdown, not rendered by `rust.tpl`.
 
 - [x] 9.1 URI parser test suite (27 tests, `secrets-core`)
 - [x] 9.2 Locked vs. unlocked behavior tests (`backend/local.rs` unit
-      tests, plus the manual end-to-end pass in §9.4)
+      tests, plus the automated D-Bus pass in §9.4)
 - [x] 9.3 Error-mapping tests (`CoreError` → `ManagerError`,
       `secrets_core::dbus::tests`)
-- [ ] 9.4 D-Bus integration tests, automated — verified manually instead:
-      a full `secrets status` → `unlock` → `list` → `get` →
-      `get` (`NotFound`) → `lock` → `get` (`VaultLocked`) run against a
-      real `secretsd` over a private `dbus-run-session` bus, plus
-      `ssh-add -L` before and after lock, all passing. Automating this
-      (spawn `secretsd`, drive it via `Client`) is the next step.
+- [x] 9.4 D-Bus integration tests, automated
+      ([#3](https://github.com/noirbizarre/secrets/issues/3)) —
+      `crates/secretsd/tests/secret_service.rs`: locked → unlock →
+      list/search → get → lock over the standard Secret Service
+      interfaces, missing items/attributes, locked-resource errors,
+      stable object paths/properties, every unsupported write rejected
+      with `NotSupported`, clean `SIGTERM` shutdown, and an assertion
+      that no demo secret value ever appears in `secretsd`'s own captured
+      log output. Replaces the manual `dbus-run-session` pass this entry
+      used to describe. `org.secrets.Manager` is out of scope here (see
+      the test file's own module doc) — only used to unlock/lock, which
+      the Secret Service interfaces cannot do on their own.
 - [ ] 9.5 CLI-to-daemon integration tests (automated) — see §9.4; the
       manual run exercised every MVP CLI command already.
 - [x] 9.6 "no secret in error/log" regression tests — see §8.2

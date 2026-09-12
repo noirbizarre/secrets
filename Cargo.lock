@@ -1816,6 +1816,7 @@ dependencies = [
  "aes-gcm",
  "argon2",
  "base64",
+ "libc",
  "libloading",
  "miette",
  "pretty_assertions",
