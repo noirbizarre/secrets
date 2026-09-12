@@ -16,4 +16,8 @@ Reading order for understanding how Secrets is put together:
 5. [1Password Desktop integration](1password-integration.md) and
    [POC results](1password-poc-results.md) — the investigation and
    validation behind the 1Password backend ([ADR-012](../adr/012-1password-desktop-backend.md)).
+6. [1Password Desktop-free cloud transport feasibility](1password-cloud-transport-feasibility.md)
+   — a separate investigation into whether `secretsd` could authenticate
+   as the user directly against 1Password's cloud, without the Desktop
+   app. Research only; nothing here has been implemented.
 </content>
