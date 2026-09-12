@@ -1,13 +1,33 @@
-# Secret Service compatibility
+# Secret Service (the standard contract)
 
 `secretsd` implements a read-only subset of the
 [freedesktop Secret Service specification](https://specifications.freedesktop.org/secret-service/latest/)
-so existing tools — `secret-tool`, GNOME Keyring/`libsecret`-based
-applications — can list and read secrets without knowing Secrets exists.
-This is a **compatibility API**: prefer
-[`org.secrets.Manager`](secrets-manager.md) for anything Secrets-aware. See
-[ADR-004](../adr/004-secret-service-compatibility-scope.md) for the full
-design rationale.
+— the **standard, primary contract**: `secret-tool`, GNOME Keyring/
+`libsecret`-based applications and any other conforming client can list
+and read secrets against `secretsd` without knowing Secrets exists, or
+containing a single line of Secrets-specific code.
+[`org.secrets.Manager`](secrets-manager.md) exists alongside it, purely as
+an extension namespace for `secret://`-shaped operations this standard has
+no way to express. See
+[ADR-004](../adr/004-secret-service-compatibility-scope.md) and
+[ADR-013](../adr/013-standard-secret-service-and-extension-namespace.md)
+for the full design rationale.
+
+## Bus name
+
+`secretsd` always owns `org.secrets.Daemon`
+(`secrets_core::dbus::SERVICE_NAME`) — that name is exclusively its own.
+It additionally requests the well-known name every standard Secret
+Service client hardcodes, `org.freedesktop.secrets`
+(`secretsd::secret_service::BUS_NAME`), **best-effort**: a desktop session
+may already run GNOME Keyring or KWallet's `ksecretsd` owning that name,
+in which case `secretsd` logs a warning and keeps running under
+`org.secrets.Daemon` only — it never fails to start, and never takes the
+name away from an already-running provider. If a standard client isn't
+reaching `secretsd`, check `secretsd`'s log for that warning; either stop
+the other provider, or point the client at `org.secrets.Daemon` as the
+D-Bus destination explicitly. See
+[ADR-013](../adr/013-standard-secret-service-and-extension-namespace.md).
 
 ## Interfaces implemented
 
@@ -18,6 +38,7 @@ design rationale.
 | `org.freedesktop.Secret.Item`          | `/org/freedesktop/secrets/collection/<vault-slug>/<slug>` |
 | `org.freedesktop.Secret.Session`       | `/org/freedesktop/secrets/session/shared` (one, shared)   |
 | `org.freedesktop.Secret.Prompt`        | `/org/freedesktop/secrets/prompt/unsupported` (one, shared) |
+| `org.freedesktop.Secret.Collection`    | `/org/freedesktop/secrets/aliases/default` (the `"default"` alias's collection, also reachable at its real path above) |
 
 `<vault-slug>`/`<slug>` are lossy, ASCII-safe encodings of the vault/item/
 field names (see `secretsd::secret_service::slug`) — used only for object
@@ -43,14 +64,18 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
   ...}` map (there is no Secret-Service-native concept of a
   vault/item/field triple to draw richer attributes from).
 - `Service.ReadAlias("default")` — resolves to the first known vault, if
-  any.
+  any; the same collection is also reachable directly at the literal
+  `/org/freedesktop/secrets/aliases/default` object path (see the
+  interfaces table above).
 
 ## What does not work (by design, in this MVP)
 
 - **Writing.** `CreateCollection`, `CreateItem`, `Item.SetSecret`,
   `Collection.Delete`, `Item.Delete`, `Service.SetAlias` all return
   `org.freedesktop.DBus.Error.NotSupported`. The local backend is
-  read-only through this compatibility layer.
+  read-only through this layer for now — tracked as follow-up work by
+  [#8](https://github.com/noirbizarre/secrets/issues/8) and `PLAN.md`,
+  not silently missing.
 - **The encrypted session algorithm.** `OpenSession` only accepts
   `"plain"`; `"dh-ietf1024-sha256-aes128-cbc-pkcs7"` is rejected with
   `NotSupported`. See ADR-004 for why.

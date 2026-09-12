@@ -1,10 +1,16 @@
 # `org.secrets.Manager`
 
-The native Secrets D-Bus API — the interface a Secrets-aware client should
-use, as opposed to the [Secret Service compatibility layer](secret-service.md)
-that exists for tools that predate this project. See
-[ADR-005](../adr/005-native-manager-api-design.md) for the design
-rationale.
+The `org.secrets.*` **extension namespace**, layered on top of the
+[standard Secret Service interfaces](secret-service.md) — not a
+replacement for them. It exists only for what that standard cannot
+express: resolving or fetching a `secret://` reference directly, and a
+single-passphrase unlock/status model. Prefer the standard interfaces for
+anything they already cover (enumerating and reading secrets); reach for
+this interface when a client needs to speak `secret://` references
+directly. See [ADR-005](../adr/005-native-manager-api-design.md) for the
+interface's own design rationale and
+[ADR-013](../adr/013-standard-secret-service-and-extension-namespace.md)
+for how it relates to the standard contract.
 
 - **Bus name:** `org.secrets.Daemon`
 - **Object path:** `/org/secrets/Manager`

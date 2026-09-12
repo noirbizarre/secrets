@@ -24,8 +24,8 @@ flowchart TB
 
     subgraph secretsd
         direction TB
-        manager["org.secrets.Manager\n(native API)"]
-        ss["org.freedesktop.Secret.*\n(compatibility)"]
+        ss["org.freedesktop.Secret.*\n(standard contract)"]
+        manager["org.secrets.Manager\n(extensions)"]
         agent[SSH agent socket]
         state[DaemonState\nlock/session]
         resolver["Resolver<br/>(secrets-core)"]
@@ -79,11 +79,13 @@ flowchart TB
    [ADR-009](../adr/009-session-and-lock-state-machine.md)),
    configuration-selected backend (`[backend] type = "local" |
    "1password"` — see [config.rs](../../crates/secretsd/src/config.rs)),
-   and three protocol surfaces: `org.secrets.Manager`
-   ([ADR-005](../adr/005-native-manager-api-design.md)), the Secret
-   Service compatibility interfaces
-   ([ADR-004](../adr/004-secret-service-compatibility-scope.md)), and the
-   SSH agent ([ADR-007](../adr/007-ssh-agent-implementation.md)).
+   and three protocol surfaces: the standard Secret Service interfaces
+   ([ADR-004](../adr/004-secret-service-compatibility-scope.md)), the
+   `org.secrets.*` extension namespace
+   ([ADR-005](../adr/005-native-manager-api-design.md)), and the SSH agent
+   ([ADR-007](../adr/007-ssh-agent-implementation.md)). See
+   [ADR-013](../adr/013-standard-secret-service-and-extension-namespace.md)
+   for how the first two relate.
 5. **Clients** — `secrets-cli` today, via `secrets-client`
    ([ADR-010](../adr/010-cli-as-thin-dbus-client.md)); GD Secrets,
    `secrets-tui` and browser native messaging hosts in the future, each a

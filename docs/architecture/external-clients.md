@@ -10,12 +10,17 @@ than guessed at when they are built.
 ## The boundary
 
 Every client — present or future, in this repository or not — talks to
-`secretsd` the same way `secrets-cli` does: over D-Bus, through
-`org.secrets.Manager` (see [ADR-005](../adr/005-native-manager-api-design.md)
-and [ADR-010](../adr/010-cli-as-thin-dbus-client.md)). A Rust client would
-normally do so through [`secrets-client`](../dbus/README.md) rather than
-`zbus` directly; a client written in another language speaks the D-Bus
-protocol itself, using the same specification. Either way, a client:
+`secretsd` the same way `secrets-cli` does: over D-Bus, through the
+standard Secret Service interfaces for anything they already express
+(enumerating and reading secrets), and `org.secrets.Manager` for
+`secret://`-shaped operations they cannot (see
+[ADR-005](../adr/005-native-manager-api-design.md),
+[ADR-010](../adr/010-cli-as-thin-dbus-client.md) and
+[ADR-013](../adr/013-standard-secret-service-and-extension-namespace.md)).
+A Rust client would normally do so through
+[`secrets-client`](../dbus/README.md) rather than `zbus` directly; a
+client written in another language speaks the D-Bus protocol itself,
+using the same specification. Either way, a client:
 
 - **owns no vault or session state.** It does not cache a decrypted
   secret past the operation that needed it, does not track lock state
@@ -33,13 +38,13 @@ client is not a special case of it.
 
 A GTK application (separate repository), intended to provide:
 
-- a real interactive unlock prompt, filling the gap the Secret Service
-  compatibility layer's `Prompt` interface currently cannot (see
+- a real interactive unlock prompt, filling the gap the standard Secret
+  Service interfaces' `Prompt` object currently cannot (see
   [ADR-004](../adr/004-secret-service-compatibility-scope.md) — the MVP's
   shared `Prompt` object always reports itself dismissed immediately,
   because no UI agent exists yet)
-- browsing vaults/items and reading fields, through `org.secrets.Manager`
-  (via `secrets-client`)
+- browsing vaults/items and reading fields, through the standard
+  interfaces and `org.secrets.Manager` (via `secrets-client`)
 - acting as the D-Bus-side counterpart for a browser extension's native
   messaging host, if that ends up being a separate process from the
   browser extension itself

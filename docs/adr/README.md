@@ -40,3 +40,6 @@ by editing the old one. The history is the value.
 - [ADR-011](011-backend-session-and-authentication-state.md) — Backend
   session and authentication state
 - [ADR-012](012-1password-desktop-backend.md) — 1Password Desktop backend
+- [ADR-013](013-standard-secret-service-and-extension-namespace.md) —
+  Standard Secret Service as the primary contract, `org.secrets.*` as
+  extensions

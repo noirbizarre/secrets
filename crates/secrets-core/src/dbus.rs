@@ -4,8 +4,18 @@
 //! `secret://` is the resource-reference scheme; D-Bus is the transport.
 //! This module owns the second half — the parts that must be identical in
 //! `secretsd` (which implements the interface) and every client (which
-//! proxies it), so the two can never drift apart. See
-//! `docs/dbus/secrets-manager.md` for the full contract.
+//! proxies it), so the two can never drift apart.
+//!
+//! `org.secrets.Manager` is the `org.secrets.*` **extension namespace**,
+//! not a replacement for the standard [freedesktop Secret
+//! Service](https://specifications.freedesktop.org/secret-service/latest/)
+//! that `secretsd` also implements (`secretsd::secret_service`) — it
+//! exists only for what that standard cannot express: resolving/fetching
+//! a `secret://` URI directly, and a single-passphrase unlock/status
+//! model. Prefer the standard interfaces for anything they already cover.
+//! See `docs/dbus/secrets-manager.md` and
+//! [ADR-013](../../../docs/adr/013-standard-secret-service-and-extension-namespace.md)
+//! for the full contract and rationale.
 
 use crate::error::CoreError;
 
@@ -23,7 +33,9 @@ pub const STATUS_LOCKED: &str = "locked";
 /// [`ManagerProxyBlocking::status`].
 pub const STATUS_UNLOCKED: &str = "unlocked";
 
-/// The native Secrets D-Bus API.
+/// The `org.secrets.*` extension namespace's `Manager` interface:
+/// `secret://`-shaped operations the standard Secret Service interfaces
+/// cannot express, layered on top of them — not a replacement API.
 ///
 /// Defined once here and consumed on both ends: `secretsd` implements it
 /// (`#[zbus::interface(name = "org.secrets.Manager")]` over the same method

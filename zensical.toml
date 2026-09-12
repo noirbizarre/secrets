@@ -29,8 +29,8 @@ nav = [
   ] },
   { "secret:// URI scheme" = "secret-uri.md" },
   { "D-Bus API" = [
-    { "org.secrets.Manager" = "dbus/secrets-manager.md" },
-    { "Secret Service compatibility" = "dbus/secret-service.md" },
+    { "Secret Service (standard)" = "dbus/secret-service.md" },
+    { "org.secrets.Manager (extensions)" = "dbus/secrets-manager.md" },
     { "SSH agent" = "dbus/ssh-agent.md" },
   ] },
   { "Security model" = "security.md" },

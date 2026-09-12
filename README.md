@@ -47,8 +47,8 @@ flowchart TB
     stclients[secret-tool / libsecret clients]
 
     subgraph secretsd
-        manager["org.secrets.Manager"]
-        secretservice["org.freedesktop.Secret.*\n(compatibility)"]
+        secretservice["org.freedesktop.Secret.*\n(standard contract)"]
+        manager["org.secrets.Manager\n(extensions)"]
         agent[SSH agent socket]
         backend[(Backend)]
     end
@@ -77,14 +77,16 @@ repository except the applications on top:
 | `secrets`                       | The CLI: a thin client, no vault or session state of its own |
 | `secrets-core`                  | The domain library: `secret://` parsing, model, backend contract |
 | `secrets-client`                | The public Rust client library for the D-Bus protocol   |
-| D-Bus (`org.secrets.*`)         | The protocol — the stable contract between `secretsd` and every client |
+| D-Bus (`org.freedesktop.Secret.*` + `org.secrets.*`) | The protocol — the standard Secret Service contract plus the `org.secrets.*` extension namespace, both stable, between `secretsd` and every client |
 
 `GD Secrets` (a GTK application), `secrets-tui`, and browser extensions are
 **separate repositories** that consume `secrets-client` or the D-Bus
 protocol directly — not workspace members of this one. See
 [`docs/architecture/external-clients.md`](docs/architecture/external-clients.md).
 A non-Rust application does not need `secrets-client` either: it can speak
-`org.secrets.Manager` over D-Bus directly, with any D-Bus library — see
+the standard Secret Service interfaces (for interoperability with
+existing tooling) or `org.secrets.Manager` (for `secret://`-specific
+operations) over D-Bus directly, with any D-Bus library — see
 [`docs/dbus/README.md`](docs/dbus/README.md).
 
 `secrets` (the CLI) is itself just one more client, no more privileged

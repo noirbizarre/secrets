@@ -54,6 +54,12 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 2.8 `docs/security.md` — MVP security model and its limitations
 - [x] 2.9 `docs/dbus/README.md` — D-Bus protocol as the Secrets IPC
       boundary, indexing the native/Secret-Service/SSH-agent protocol docs
+- [x] 2.10 Reframe `docs/dbus/`, `docs/architecture/overview.md`,
+      `docs/architecture/external-clients.md` and `README.md`: the
+      standard Secret Service interfaces are the primary, interoperable
+      contract; `org.secrets.Manager` is documented as the `org.secrets.*`
+      extension namespace for `secret://`-shaped operations the standard
+      cannot express — not a replacement API (see ADR-013, §3.11)
 
 ## 3. Architecture Decision Records (`docs/adr/`)
 
@@ -82,6 +88,10 @@ This file is plain markdown, not rendered by `rust.tpl`.
       Session/lock state machine, daemon as sole authority
 - [x] 3.10 [ADR-010](docs/adr/010-cli-as-thin-dbus-client.md) — CLI as a
       thin D-Bus client only, no independent state
+- [x] 3.11 [ADR-013](docs/adr/013-standard-secret-service-and-extension-namespace.md)
+      — Standard Secret Service as the primary contract, `org.secrets.*`
+      as extensions; also closes the gap where `org.freedesktop.secrets`
+      was never requested as a bus name
 
 ## 4. `secrets-core` (domain/core library)
 

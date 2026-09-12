@@ -5,17 +5,27 @@ D-Bus is not an implementation detail of `secretsd` — it is the
 every client, present or future, Rust or not, relies on to talk to
 `secretsd`. This directory is that protocol's specification.
 
+- [`secret-service.md`](secret-service.md) — the standard freedesktop
+  [Secret Service](https://specifications.freedesktop.org/secret-service/latest/)
+  interfaces, the **primary, interoperable contract**: any client
+  written against the specification (`secret-tool`, `libsecret`, GNOME
+  Keyring/KWallet-compatible consumers) works against `secretsd`
+  unmodified, no Secrets-specific code required.
 - [`secrets-manager.md`](secrets-manager.md) — `org.secrets.Manager`, the
-  native Secrets-aware API (`Status`/`Unlock`/`Lock`/`ListVaults`/
-  `ListItems`/`Resolve`/`Get`).
-- [`secret-service.md`](secret-service.md) — the freedesktop
-  [Secret Service](https://specifications.freedesktop.org/secret-service/)
-  compatibility interfaces, for tools that predate this project
-  (`secret-tool`, `libsecret`, GNOME Keyring clients).
+  `org.secrets.*` **extension namespace** layered on top, for
+  `secret://`-shaped operations the standard interfaces have no way to
+  express (`Resolve`/`Get` a `secret://` reference directly,
+  single-passphrase `Unlock`/`Status`).
 - [`ssh-agent.md`](ssh-agent.md) — the standard SSH agent wire protocol
   over its own Unix socket, documented here for completeness even though
   it is deliberately **not** D-Bus (see [ADR-001](../adr/001-dbus-as-the-ipc-mechanism.md)
   for why that one exception exists).
+
+See [ADR-013](../adr/013-standard-secret-service-and-extension-namespace.md)
+for why the two D-Bus surfaces are framed this way, and for the bus-name
+detail that makes the standard contract actually reachable (`secretsd`
+requests `org.freedesktop.secrets` best-effort, in addition to its own
+`org.secrets.Daemon`).
 
 ## Source of truth and bindings
 
@@ -49,6 +59,6 @@ can be appended without breaking existing clients, since D-Bus dispatches
 by name. An existing method's signature is never changed after the fact —
 a genuinely incompatible change is a new method, not a modification of an
 existing one (see each page's own "Compatibility" section for specifics).
-The Secret Service compatibility interfaces follow the specification's own
+The standard Secret Service interfaces follow the specification's own
 shape instead, by definition, and are versioned by that specification, not
 by this project.
