@@ -86,7 +86,7 @@ pub struct ResolvePayload<'a> {
 /// `get --json`'s shape.
 ///
 /// Built with `value` borrowed from a call to
-/// [`secrets_core::SecretValue::expose_secret`] at the single call site
+/// [`secrets_client::SecretValue::expose_secret`] at the single call site
 /// that needs it — this type has no knowledge of `SecretValue` itself,
 /// so it cannot be handed one by accident and serialize it implicitly.
 #[derive(Serialize)]

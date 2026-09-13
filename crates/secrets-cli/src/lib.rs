@@ -21,7 +21,6 @@ use cli::Command;
 use error::{CliError, Result};
 use output::{GetMode, GetPayload, ItemsPayload, ResolvePayload, StatusPayload, VaultsPayload};
 use secrets_client::SecretsClient as Client;
-use secrets_core::SecretValue;
 
 /// Run a parsed subcommand to completion, printing its output.
 ///
@@ -93,10 +92,11 @@ pub fn run(command: Command) -> Result<()> {
             let mode =
                 output::resolve_get_mode(raw, json, clipboard, std::io::stdout().is_terminal())?;
             let client = Client::connect()?;
-            // Wrapped the instant it arrives: from here on the plaintext
-            // is reachable only through `expose_secret()`, one call below
+            // secrets-client wraps this in `SecretValue` the instant it
+            // arrives from the wire: from here on the plaintext is
+            // reachable only through `expose_secret()`, one call below
             // per `mode` — never through a stray `{:?}` or `Serialize`.
-            let value = SecretValue::new(client.get(&uri)?);
+            let value = client.get(&uri)?;
             match mode {
                 GetMode::Raw => println!("{}", value.expose_secret()),
                 GetMode::Json => print_json(&GetPayload {
