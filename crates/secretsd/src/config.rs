@@ -132,9 +132,21 @@ mod tests {
 
     #[test]
     fn a_missing_config_file_yields_the_default_local_configuration() {
-        // XDG_CONFIG_HOME is whatever the test environment has; the
-        // meaningful assertion is simply that this never errors and
-        // defaults to Local, since a config file is optional.
+        // Isolated from the developer's/CI runner's *real*
+        // `~/.config/secrets/secretsd.toml`, if one exists (e.g. a
+        // developer who has already configured a real backend for their
+        // own use) — this test is specifically about the *absent-file*
+        // fallback, so it must not depend on whatever happens to be on
+        // disk outside this temporary directory.
+        //
+        // SAFETY: this test does not run any other test in the same
+        // process — `cargo nextest` isolates each test in its own
+        // process, so this does not race with another test's own env
+        // (see `backend::onepassword::ffi::tests::load_honors_the_override_env_var`
+        // for the same reasoning).
+        let empty_config_home = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", empty_config_home.path()) };
+
         let config = Config::load().unwrap();
         assert_eq!(config.backend, BackendKind::Local);
     }

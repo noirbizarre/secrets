@@ -47,6 +47,17 @@ impl Authenticator for OnePasswordAuthenticator {
     }
 }
 
+/// The largest `item_ids` list 1Password Desktop's own `ItemsGetAll`
+/// operation accepts in one call — an undocumented constraint (nothing in
+/// `docs/architecture/1password-integration.md` or 1Password's own SDK
+/// docs states it), discovered empirically against a real account whose
+/// vault held more than this many items. Its own IPC error text, verbatim:
+/// `"invalid user input: encountered the following errors: you can only
+/// retrieve up to 50 items at once"`. `list_items` chunks around this
+/// transparently — every other `Backend` implementation, and every caller
+/// of this one, is unaffected by it.
+const ITEMS_GET_ALL_BATCH_LIMIT: usize = 50;
+
 /// The `Backend`/`BackendSession` implementation over 1Password Desktop.
 pub struct OnePasswordBackend {
     session: SessionManager,
@@ -267,38 +278,49 @@ impl Backend for OnePasswordBackend {
             return Ok(Vec::new());
         }
 
-        // One call for every item in the vault, not one per item (see
-        // this module's own doc comment and the task's own constraint).
-        // The response's raw bytes carry 1Password's real, decrypted
-        // field *values* alongside their metadata — this project's own
-        // `ItemField` type (see `types.rs`) never declares a `value`
-        // field, so none of it is copied into anything this backend
-        // holds onto beyond this call, but the raw buffer itself briefly
-        // holds plaintext in memory. Best-effort mitigation: zeroize the
-        // local copy immediately after parsing (`ipc::Response`'s own
-        // backing buffer is not zeroized on drop today — a known
-        // limitation, documented in docs/security.md).
-        let response = self
-            .session
-            .execute(|client, client_id| {
-                let request = protocol::invoke_request(
-                    &self.account_name,
-                    client_id,
-                    "ItemsGetAll",
-                    serde_json::json!({ "vault_id": vault_id, "item_ids": item_ids }),
-                );
-                client.invoke(&request)
-            })
-            .map_err(CallError::from)
-            .map_err(map_generic_error)?;
-        let mut raw_bytes = response.as_bytes().to_vec();
-        let parsed: Result<types::ItemsGetAllResponse, _> =
-            protocol::parse_invoke_response(&raw_bytes);
-        raw_bytes.zeroize();
-        let batch = parsed.map_err(CallError::from).map_err(map_generic_error)?;
+        // One `ItemsGetAll` call per chunk of at most `ITEMS_GET_ALL_BATCH_LIMIT`
+        // IDs, not one per item (see this module's own doc comment and the
+        // task's own constraint) — but also never all of them in a single
+        // call: 1Password Desktop's own IPC rejects a request whose
+        // `item_ids` list has more than that many entries (see the
+        // constant's own doc comment), discovered against a real account
+        // with a vault larger than that. Each chunk's response is parsed
+        // and its raw bytes zeroized immediately (see below), and every
+        // chunk's already-parsed, non-secret metadata is accumulated
+        // before mapping to `secrets_core::Item`s once, at the end.
+        let mut individual_responses = Vec::with_capacity(item_ids.len());
+        for chunk in item_ids.chunks(ITEMS_GET_ALL_BATCH_LIMIT) {
+            // The response's raw bytes carry 1Password's real, decrypted
+            // field *values* alongside their metadata — this project's own
+            // `ItemField` type (see `types.rs`) never declares a `value`
+            // field, so none of it is copied into anything this backend
+            // holds onto beyond this call, but the raw buffer itself briefly
+            // holds plaintext in memory. Best-effort mitigation: zeroize the
+            // local copy immediately after parsing (`ipc::Response`'s own
+            // backing buffer is not zeroized on drop today — a known
+            // limitation, documented in docs/security.md).
+            let response = self
+                .session
+                .execute(|client, client_id| {
+                    let request = protocol::invoke_request(
+                        &self.account_name,
+                        client_id,
+                        "ItemsGetAll",
+                        serde_json::json!({ "vault_id": vault_id, "item_ids": chunk }),
+                    );
+                    client.invoke(&request)
+                })
+                .map_err(CallError::from)
+                .map_err(map_generic_error)?;
+            let mut raw_bytes = response.as_bytes().to_vec();
+            let parsed: Result<types::ItemsGetAllResponse, _> =
+                protocol::parse_invoke_response(&raw_bytes);
+            raw_bytes.zeroize();
+            let batch = parsed.map_err(CallError::from).map_err(map_generic_error)?;
+            individual_responses.extend(batch.individual_responses);
+        }
 
-        Ok(batch
-            .individual_responses
+        Ok(individual_responses
             .into_iter()
             .filter_map(|entry| entry.content)
             .map(|item| Item {
@@ -454,6 +476,55 @@ mod tests {
         assert!(kinds.contains(&&FieldKind::Username));
         assert!(kinds.contains(&&FieldKind::Password));
         assert!(kinds.contains(&&FieldKind::Totp));
+    }
+
+    #[test]
+    fn list_items_chunks_items_get_all_across_more_than_fifty_items() {
+        // Regression guard: a vault with more items than
+        // `ITEMS_GET_ALL_BATCH_LIMIT` used to send every item ID in one
+        // `ItemsGetAll` call, which 1Password Desktop's own IPC rejects
+        // above 50 — discovered against a real account. 51 items forces
+        // exactly two chunked calls (50, then 1).
+        let dir = tempfile::tempdir().unwrap();
+        let item_count = ITEMS_GET_ALL_BATCH_LIMIT + 1;
+
+        let overviews: Vec<_> = (0..item_count)
+            .map(|index| serde_json::json!({ "id": format!("item-{index}") }))
+            .collect();
+
+        let mut individual_responses: Vec<_> = (0..item_count)
+            .map(|index| {
+                serde_json::json!({
+                    "content": {
+                        "title": format!("Item {index}"),
+                        "fields": [{"title": "password", "fieldType": "Concealed"}],
+                    },
+                    "error": null,
+                })
+            })
+            .collect();
+        let second_chunk = individual_responses.split_off(ITEMS_GET_ALL_BATCH_LIMIT);
+        assert_eq!(individual_responses.len(), ITEMS_GET_ALL_BATCH_LIMIT);
+        assert_eq!(second_chunk.len(), 1);
+
+        let responses = vec![
+            success_envelope(&1u64), // init_client
+            success_envelope(&serde_json::json!([{"id": "v1", "title": "Personal"}])), // VaultsList
+            success_envelope(&serde_json::json!(overviews)), // ItemsList
+            success_envelope(&serde_json::json!({ "individualResponses": individual_responses })), // ItemsGetAll #1 (50)
+            success_envelope(&serde_json::json!({ "individualResponses": second_chunk })), // ItemsGetAll #2 (1)
+        ];
+        let Some(backend) = backend_over(dir.path(), responses) else {
+            eprintln!("skipping: no C compiler available");
+            return;
+        };
+
+        let items = backend.list_items("Personal").unwrap();
+        assert_eq!(
+            items.len(),
+            item_count,
+            "every item across both chunked ItemsGetAll calls must be present"
+        );
     }
 
     #[test]
