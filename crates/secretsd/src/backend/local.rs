@@ -80,11 +80,15 @@ impl FieldData {
         }
     }
 
-    fn decrypt(&self, key: &VaultKey) -> std::result::Result<String, ()> {
-        let nonce = BASE64.decode(&self.nonce).map_err(|_| ())?;
-        let nonce: [u8; 12] = nonce.try_into().map_err(|_| ())?;
-        let ciphertext = BASE64.decode(&self.ciphertext).map_err(|_| ())?;
-        crypto::decrypt(key, &Encrypted { nonce, ciphertext }).map_err(|_| ())
+    fn decrypt(&self, key: &VaultKey) -> std::result::Result<String, crypto::DecryptError> {
+        let nonce = BASE64
+            .decode(&self.nonce)
+            .map_err(|_| crypto::DecryptError)?;
+        let nonce: [u8; 12] = nonce.try_into().map_err(|_| crypto::DecryptError)?;
+        let ciphertext = BASE64
+            .decode(&self.ciphertext)
+            .map_err(|_| crypto::DecryptError)?;
+        crypto::decrypt(key, &Encrypted { nonce, ciphertext })
     }
 }
 
@@ -418,7 +422,7 @@ impl Backend for LocalBackend {
             .and_then(|i| i.fields.get(field))
             .ok_or_else(not_found)?;
 
-        let plaintext = field_data.decrypt(key).map_err(|()| {
+        let plaintext = field_data.decrypt(key).map_err(|crypto::DecryptError| {
             // The key already passed the integrity canary at unlock time,
             // so reaching this means the field's own ciphertext was
             // corrupted independently — report it as unavailable, not as a
