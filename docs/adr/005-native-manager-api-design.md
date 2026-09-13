@@ -24,7 +24,7 @@ A second, Secrets-owned interface: `org.secrets.Manager`, defined once in
 the same declaration, so `secrets-client` (and `secrets-cli` through it)
 never needs an async runtime just to make a method call (see ADR-010).
 
-Six methods for the MVP:
+Seven methods for the MVP:
 
 - `Status` / `Unlock` / `Lock` — the session/lock state machine (ADR-009).
 - `ListVaults` / `ListItems` — metadata only, available regardless of lock
