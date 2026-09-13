@@ -43,3 +43,5 @@ by editing the old one. The history is the value.
 - [ADR-013](013-standard-secret-service-and-extension-namespace.md) —
   Standard Secret Service as the primary contract, `org.secrets.*` as
   extensions
+- [ADR-014](014-cli-secret-disclosure-modes.md) — `secrets get`'s output
+  modes and terminal disclosure refusal

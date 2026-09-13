@@ -27,6 +27,32 @@ detail that makes the standard contract actually reachable (`secretsd`
 requests `org.freedesktop.secrets` best-effort, in addition to its own
 `org.secrets.Daemon`).
 
+## Which interface each `secrets` command uses
+
+A reader who only runs `secrets --help` and never opens the pages above:
+every `secrets` subcommand today goes through the `org.secrets.*`
+extension namespace, because every one of them is a `secret://`-shaped
+operation the standard interfaces have no way to express (a
+single-passphrase unlock model, or resolving/fetching a `secret://`
+reference directly rather than a Secret Service object path). Nothing in
+the CLI talks to the standard Secret Service interfaces — those exist for
+*other* clients (`secret-tool`, `libsecret`-based applications) to keep
+working unmodified, not for `secrets` itself to use.
+
+| Command                         | Interface             | Method                        |
+| -------------------------------- | ---------------------- | ------------------------------ |
+| `secrets status`                 | `org.secrets.Manager`  | `Status`                       |
+| `secrets unlock`                 | `org.secrets.Manager`  | `Unlock`                       |
+| `secrets lock`                   | `org.secrets.Manager`  | `Lock`                         |
+| `secrets list`                   | `org.secrets.Manager`  | `ListVaults` / `ListItems`     |
+| `secrets resolve`                | `org.secrets.Manager`  | `Resolve`                      |
+| `secrets get`                    | `org.secrets.Manager`  | `Get`                          |
+
+See [ADR-014](../adr/014-cli-secret-disclosure-modes.md) for what `secrets
+get` does with the value once it has it (default/`--raw`/`--json`/
+`--clipboard`) — a CLI-side decision, not a protocol one; the wire method
+called is `Get` in every case.
+
 ## Source of truth and bindings
 
 `org.secrets.Manager`'s definition lives once, in Rust, at

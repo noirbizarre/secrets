@@ -59,9 +59,18 @@ its password is.
   never a field's value. This is enforced by construction (no code path
   builds one from a `SecretValue`), and exercised by tests (e.g.
   `secrets_core::resolver::tests::resolving_an_unknown_field_reports_not_found_without_the_value`).
-- `secrets-cli` prints a secret's value in exactly one place: the output
-  of `secrets get`, because the user explicitly asked for it. No other
-  command, and no error path, prints one.
+- `secrets-cli` prints or otherwise discloses a secret's value in exactly
+  one place: `secrets get`, because the user explicitly asked for it —
+  as a bare value (default off a terminal, or `--raw`), as
+  `{"uri": ..., "value": ...}` (`--json`), or copied to the clipboard
+  (`--clipboard`, see [ADR-014](adr/014-cli-secret-disclosure-modes.md)).
+  No other command, and no error path, discloses one; `get`'s handler
+  wraps the value in `secrets_core::SecretValue` the instant it arrives,
+  so nothing else in that command's own code path can print or serialize
+  it by accident either.
+- `secrets get` with no output flag refuses to print the value at all
+  when stdout is a real terminal, rather than relying on the caller to
+  remember `--raw`/`--json`/`--clipboard` themselves — see ADR-014.
 - `secretsd`'s `tracing` output logs operation names and identifiers, never
   field values.
 
@@ -96,6 +105,10 @@ its password is.
 - **No signal-based graceful shutdown.** `secretsd` relies on the OS to
   reclaim its memory on termination; it does not currently intercept
   `SIGTERM` to zeroize state before exiting (see "Memory hygiene" above).
+- **`secrets get --clipboard` does not auto-clear the clipboard.** The
+  value stays there with no expiry until something else overwrites it or
+  the session ends — unlike e.g. `pass -c`'s timed clear. See
+  [ADR-014](adr/014-cli-secret-disclosure-modes.md).
 - **The 1Password backend's `list_items` briefly holds decrypted field
   *values* in memory, even though it only reports metadata.** Unlike
   `LocalBackend` (which truly never touches encrypted values to list

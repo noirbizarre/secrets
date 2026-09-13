@@ -28,12 +28,33 @@ pub enum Command {
     List {
         /// The vault to list items from. Omit to list vault names instead.
         vault: Option<String>,
+
+        /// Print as a JSON object instead of one name per line.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Fetch a secret's value.
+    ///
+    /// With no flag, prints the bare value when stdout is not a terminal
+    /// (the scripted/piped case); refuses when it is, naming the three
+    /// flags below as explicit alternatives — see ADR-014.
     Get {
         /// A `secret://<vault>/<item>/<field>` reference.
         uri: String,
+
+        /// Print the bare value, even to a terminal.
+        #[arg(long, conflicts_with_all = ["json", "clipboard"])]
+        raw: bool,
+
+        /// Print `{"uri": ..., "value": ...}` instead of the bare value.
+        #[arg(long, conflicts_with_all = ["raw", "clipboard"])]
+        json: bool,
+
+        /// Copy the value to the clipboard instead of printing it. Not
+        /// auto-cleared.
+        #[arg(long, conflicts_with_all = ["raw", "json"])]
+        clipboard: bool,
     },
 
     /// Validate and canonicalise a `secret://` reference, without printing
@@ -41,6 +62,10 @@ pub enum Command {
     Resolve {
         /// A `secret://<vault>/<item>/<field>` reference.
         uri: String,
+
+        /// Print as a JSON object instead of a bare line.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Lock the store.
@@ -50,7 +75,11 @@ pub enum Command {
     Unlock,
 
     /// Show whether the store is locked or unlocked.
-    Status,
+    Status {
+        /// Print as a JSON object instead of a bare line.
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Inject secrets into a template. Not yet implemented.
     Inject(InjectArgs),

@@ -13,6 +13,14 @@
 //! suite's non-interactive stdin cannot exercise — see `support`'s module
 //! doc on why piping a line to stdin is still a faithful test of `secrets
 //! unlock` itself).
+//!
+//! Also not re-tested here: `secrets get`'s default refusal to print a
+//! secret's value to a real terminal (see ADR-014 and
+//! `secrets_cli::output::resolve_get_mode`'s own unit tests) —
+//! `assert_cmd`'s pipes are never a real TTY, so every test below that
+//! drives `get` with no output flag exercises the *other* branch of that
+//! same rule (stdout not a terminal → print the bare value), which is
+//! also this suite's existing, unchanged behaviour.
 
 mod support;
 
@@ -235,6 +243,137 @@ fn resolve_prints_the_canonicalised_uri_and_never_the_value() {
         .assert()
         .success()
         .stdout("secret://Personal/GitHub/password\n")
+        .stdout(predicate::str::contains(DEMO_PASSWORD).not());
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn get_with_raw_prints_exactly_the_value_regardless_of_stdout() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    // `--raw` is an explicit ask, so it behaves the same whether or not
+    // stdout happens to be a terminal — this suite can only drive the
+    // "not a terminal" side of that, per this file's own module doc.
+    daemon
+        .cli()
+        .args(["get", "secret://Personal/GitHub/password", "--raw"])
+        .assert()
+        .success()
+        .stdout(format!("{DEMO_PASSWORD}\n"));
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn get_with_json_prints_the_uri_and_value_as_json() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    let expected = serde_json::json!({
+        "uri": "secret://Personal/GitHub/password",
+        "value": DEMO_PASSWORD,
+    });
+
+    daemon
+        .cli()
+        .args(["get", "secret://Personal/GitHub/password", "--json"])
+        .assert()
+        .success()
+        .stdout(format!("{expected}\n"));
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn get_with_conflicting_output_flags_is_a_clap_usage_error() {
+    // Clap's own `conflicts_with_all` rejects this before
+    // `secrets_cli::run` ever sees it — no daemon needed, same rationale
+    // as the missing-argument case below.
+    let bus = TestBus::start();
+
+    bus.cli()
+        .args([
+            "get",
+            "secret://Personal/GitHub/password",
+            "--raw",
+            "--json",
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn status_with_json_prints_a_json_object() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["status", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"status\":\"locked\"}\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn list_with_json_prints_vault_names_as_json() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["list", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"vaults\":[\"Infrastructure\",\"Personal\"]}\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn list_with_a_vault_and_json_prints_item_paths_as_json() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["list", "Personal", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"vault\":\"Personal\",\"items\":[\"GitHub\"]}\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn resolve_with_json_prints_the_uri_as_json() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    daemon
+        .cli()
+        .args(["resolve", "secret://Personal/GitHub/password", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"uri\":\"secret://Personal/GitHub/password\"}\n")
         .stdout(predicate::str::contains(DEMO_PASSWORD).not());
 
     daemon.assert_no_secrets_leaked();

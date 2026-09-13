@@ -80,6 +80,23 @@ pub enum CliError {
         /// What went wrong, in human terms.
         reason: String,
     },
+
+    /// `secrets get` was run with no output flag and stdout is a real
+    /// terminal — see ADR-014. Not raised when stdout is piped/redirected.
+    #[error("refusing to print a secret's value to a terminal")]
+    #[diagnostic(
+        code(secrets::cli::refused_terminal_output),
+        help(
+            "pass --raw to print anyway, --json for structured output, or --clipboard to copy it without printing"
+        )
+    )]
+    RefusedTerminalOutput,
+
+    /// `secrets get --clipboard` could not reach a clipboard (no display,
+    /// or the platform's clipboard mechanism is otherwise unavailable).
+    #[error("could not access the clipboard: {0}")]
+    #[diagnostic(code(secrets::cli::clipboard_unavailable))]
+    ClipboardUnavailable(String),
 }
 
 impl From<zbus::Error> for CliError {
