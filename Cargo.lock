@@ -781,6 +781,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "escargot"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11c3aea32bc97b500c9ca6a72b768a26e558264303d101d3409cf6d57a9ed0cf"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "event-listener"
 version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1773,11 +1784,13 @@ dependencies = [
  "clap",
  "console",
  "demand",
+ "escargot",
  "miette",
  "predicates",
  "pretty_assertions",
  "rstest",
  "secrets-client",
+ "secretsd",
  "serde",
  "tempfile",
  "thiserror",

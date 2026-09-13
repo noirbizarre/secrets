@@ -1,0 +1,284 @@
+//! End-to-end integration tests for the `secrets` CLI, over a real
+//! `secretsd` binary on a private D-Bus session bus — see issue #4.
+//!
+//! Every test spawns its own daemon/bus (via `support::TestDaemon` or, for
+//! the "daemon absent" case, `support::TestBus` alone) and drives the real
+//! `secrets` binary through `assert_cmd` — no in-process shortcuts, so a
+//! regression in argument parsing, output formatting, or error mapping
+//! shows up the same way it would for a real user.
+//!
+//! Deliberately **not** re-tested here: the Secret Service wire protocol
+//! itself (`crates/secretsd/tests/secret_service.rs`, issue #3) and
+//! `demand`'s own masked-prompt rendering (a TTY-only code path this
+//! suite's non-interactive stdin cannot exercise — see `support`'s module
+//! doc on why piping a line to stdin is still a faithful test of `secrets
+//! unlock` itself).
+
+mod support;
+
+use predicates::prelude::*;
+use support::{DEMO_PASSPHRASE, DEMO_PASSWORD, TestBus, TestDaemon};
+
+#[test]
+fn status_reports_locked_before_any_unlock() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .arg("status")
+        .assert()
+        .success()
+        .stdout("locked\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn unlock_reports_success_and_status_reflects_it() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success()
+        .stdout("unlocked\n");
+
+    daemon
+        .cli()
+        .arg("status")
+        .assert()
+        .success()
+        .stdout("unlocked\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn unlock_with_the_wrong_passphrase_is_rejected_and_the_store_stays_locked() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin("definitely not the right passphrase\n")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "incorrect passphrase, or the vault file is corrupted",
+        ));
+
+    daemon
+        .cli()
+        .arg("status")
+        .assert()
+        .success()
+        .stdout("locked\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn lock_relocks_an_unlocked_store() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    daemon
+        .cli()
+        .arg("lock")
+        .assert()
+        .success()
+        .stdout("locked\n");
+
+    daemon
+        .cli()
+        .arg("status")
+        .assert()
+        .success()
+        .stdout("locked\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn list_without_a_vault_lists_vault_names_even_while_locked() {
+    let daemon = TestDaemon::start();
+
+    // Vault names are metadata, not secret material — listable before the
+    // very first `unlock` (see `LocalBackend::list_vaults`'s own doc
+    // comment, exercised at the wire level already by issue #3's suite).
+    daemon
+        .cli()
+        .arg("list")
+        .assert()
+        .success()
+        .stdout("Infrastructure\nPersonal\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn list_with_a_vault_lists_its_item_paths_even_while_locked() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["list", "Personal"])
+        .assert()
+        .success()
+        .stdout("GitHub\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn list_with_an_unknown_vault_reports_not_found() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["list", "NoSuchVault"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("NoSuchVault"));
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn get_while_locked_reports_vault_locked_with_an_unlock_hint() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["get", "secret://Personal/GitHub/password"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(
+            predicate::str::contains("vault 'Personal' is locked")
+                .and(predicate::str::contains("secrets unlock")),
+        );
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn get_after_unlock_prints_exactly_the_secret_value_and_nothing_else() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    // The one place a demo secret value is expected to appear anywhere in
+    // this suite's assertions — deliberately printed because the user
+    // explicitly asked for it via `secrets get`.
+    daemon
+        .cli()
+        .args(["get", "secret://Personal/GitHub/password"])
+        .assert()
+        .success()
+        .stdout(format!("{DEMO_PASSWORD}\n"));
+
+    // The daemon's own logs must still never contain it, even though this
+    // very test just asked the CLI to print it.
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn get_with_an_unknown_field_reports_not_found() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    daemon
+        .cli()
+        .args(["get", "secret://Personal/GitHub/does-not-exist"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "secret not found: secret://Personal/GitHub/does-not-exist",
+        ));
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn resolve_prints_the_canonicalised_uri_and_never_the_value() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    daemon
+        .cli()
+        .args(["resolve", "secret://Personal/GitHub/password"])
+        .assert()
+        .success()
+        .stdout("secret://Personal/GitHub/password\n")
+        .stdout(predicate::str::contains(DEMO_PASSWORD).not());
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn resolve_with_a_malformed_uri_reports_invalid_uri() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["resolve", "not-a-secret-uri"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("invalid secret:// reference"));
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn commands_report_daemon_unreachable_when_secretsd_is_not_running() {
+    // A real, private session bus — just nothing owns `org.secrets.Daemon`
+    // on it, which is exactly "the daemon is not running" from a client's
+    // point of view.
+    let bus = TestBus::start();
+
+    bus.cli().arg("status").assert().failure().code(1).stderr(
+        predicate::str::contains("could not reach secretsd on the session bus")
+            .and(predicate::str::contains("systemctl --user status secretsd")),
+    );
+}
+
+#[test]
+fn get_with_a_missing_uri_argument_is_a_clap_usage_error() {
+    // Clap's own argument-parsing failure — exits before `secrets_cli::run`
+    // ever runs, so no daemon or bus is needed at all; `TestBus` is used
+    // only so `.cli()` stays the one way every test builds this command.
+    let bus = TestBus::start();
+
+    bus.cli()
+        .arg("get")
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("Usage"));
+}

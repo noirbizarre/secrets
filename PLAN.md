@@ -148,8 +148,8 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 6.4 Interactive prompts via `demand` (unlock passphrase, masked)
 - [x] 6.5 Config loading: `~/.config/secrets/config.toml`, XDG, `toml`
       crate (`config.rs`)
-- [ ] 6.6 CLI integration tests (`assert_cmd`, against a test daemon) — dev
-      dependency present, not yet written; see §9.5
+- [x] 6.6 CLI integration tests (`assert_cmd`, against a test daemon) — see
+      §9.5
 
 ## 7. Backends
 
@@ -175,8 +175,11 @@ This file is plain markdown, not rendered by `rust.tpl`.
       output (`secrets_core::resolver::tests`,
       `secrets_core::secret_value::tests`), extended to `secretsd`'s own
       captured stdout/stderr across a full locked/unlock/get/lock D-Bus
-      session (`tests/secret_service.rs`'s `assert_no_secrets_leaked`) —
-      not yet extended to `secrets-cli`'s own log output specifically
+      session (`tests/secret_service.rs`'s `assert_no_secrets_leaked`), and
+      to the `secrets` CLI's own stdout/stderr across the same cycle
+      (`secrets-cli/tests/end_to_end.rs`, §9.5) — every error-path
+      assertion there, plus `resolve`'s success path, checks a demo secret
+      value never appears outside `get`'s one deliberate line
 - [x] 8.3 Memory hygiene: `SecretValue`/`VaultKey` are
       `Zeroize`/`ZeroizeOnDrop`; documented `SIGKILL`/abort limitation in
       `docs/security.md`
@@ -200,8 +203,19 @@ This file is plain markdown, not rendered by `rust.tpl`.
       used to describe. `org.secrets.Manager` is out of scope here (see
       the test file's own module doc) — only used to unlock/lock, which
       the Secret Service interfaces cannot do on their own.
-- [ ] 9.5 CLI-to-daemon integration tests (automated) — see §9.4; the
-      manual run exercised every MVP CLI command already.
+- [x] 9.5 CLI-to-daemon integration tests (automated)
+      ([#4](https://github.com/noirbizarre/secrets/issues/4)) —
+      `crates/secrets-cli/tests/end_to_end.rs`: real `secrets`/`secretsd`
+      binaries over a private D-Bus session bus, covering `status`,
+      `list`, `get`, `resolve`, `unlock`, `lock`, daemon absent, locked
+      backend, missing vault/item/field, malformed `secret://` URIs and a
+      clap usage error, asserting exit codes, stdout/stderr text, and that
+      no demo secret value ever appears anywhere except `get`'s own
+      deliberate output. Unlike §9.4, drives the daemon only through the
+      CLI itself (no raw `zbus`), and locates the cross-package
+      `secretsd` binary via `escargot` rather than
+      `CARGO_BIN_EXE_secretsd` (only set for tests in `secretsd`'s own
+      package — see `tests/support/mod.rs`'s module doc).
 - [x] 9.6 "no secret in error/log" regression tests — see §8.2
 
 ## 10. CI / Release
