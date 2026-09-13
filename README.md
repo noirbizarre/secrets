@@ -74,7 +74,7 @@ repository except the applications on top:
 | Crate                          | Role                                                    |
 | ------------------------------- | -------------------------------------------------------- |
 | `secretsd`                      | The daemon/service: owns the secret store and session/lock state |
-| `secrets`                       | The CLI: a thin client, no vault or session state of its own |
+| `secrets-cli` (binary: `secrets`) | The CLI: a thin client, no vault or session state of its own |
 | `secrets-core`                  | The domain library: `secret://` parsing, model, backend contract |
 | `secrets-client`                | The public Rust client library for the D-Bus protocol   |
 | D-Bus (`org.freedesktop.Secret.*` + `org.secrets.*`) | The protocol — the standard Secret Service contract plus the `org.secrets.*` extension namespace, both stable, between `secretsd` and every client |
