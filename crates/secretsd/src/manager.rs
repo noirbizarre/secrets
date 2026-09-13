@@ -6,6 +6,7 @@
 //! `docs/dbus/secrets-manager.md` for the wire contract.
 
 use std::sync::Arc;
+use std::sync::mpsc;
 
 use secrets_core::SecretUri;
 use secrets_core::dbus::ManagerError;
@@ -16,13 +17,25 @@ use crate::state::DaemonState;
 /// The object served at `secrets_core::dbus::MANAGER_PATH`.
 pub struct ManagerIface {
     state: Arc<DaemonState>,
+    /// Wakes `secret_service::refresh`'s background loop immediately
+    /// after a successful `unlock`/`lock`, instead of leaving it to the
+    /// next periodic scan (see `secret_service::refresh::spawn`, ADR-015)
+    /// — the one case that matters in practice: the local backend's vault
+    /// file being created for the first time. Sending is always
+    /// best-effort (`let _ = ...`): a full/disconnected channel must never
+    /// fail the D-Bus call itself.
+    refresh_trigger: mpsc::Sender<()>,
 }
 
 impl ManagerIface {
-    /// Wrap shared daemon state as a servable interface.
+    /// Wrap shared daemon state and the topology refresher's trigger
+    /// channel as a servable interface.
     #[must_use]
-    pub fn new(state: Arc<DaemonState>) -> Self {
-        Self { state }
+    pub fn new(state: Arc<DaemonState>, refresh_trigger: mpsc::Sender<()>) -> Self {
+        Self {
+            state,
+            refresh_trigger,
+        }
     }
 }
 
@@ -40,12 +53,19 @@ impl ManagerIface {
             // distinct D-Bus error name so a client does not retry blindly.
             DaemonError::IncorrectPassphrase => ManagerError::PermissionDenied(error.to_string()),
             other => ManagerError::BackendUnavailable(other.to_string()),
-        })
+        })?;
+        // On first-ever unlock, this is exactly when the local backend's
+        // vault file (and its collections) start existing — wake the
+        // refresher immediately rather than leaving them invisible over
+        // Secret Service for up to `REFRESH_INTERVAL`.
+        let _ = self.refresh_trigger.send(());
+        Ok(())
     }
 
     /// See [`secrets_core::dbus::Manager::lock`].
     fn lock(&self) {
         self.state.lock();
+        let _ = self.refresh_trigger.send(());
     }
 
     /// See [`secrets_core::dbus::Manager::list_vaults`].

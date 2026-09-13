@@ -101,6 +101,10 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 3.14 [ADR-014](docs/adr/014-cli-secret-disclosure-modes.md) —
       `secrets get`'s output modes (`--raw`/`--json`/`--clipboard`) and its
       default refusal to print a bare value to a terminal
+- [x] 3.15 [ADR-015](docs/adr/015-live-secret-service-topology.md) — Live
+      Secret Service topology: a background scan reconciles
+      `Collection`/`Item` objects instead of a fixed, fatal, one-shot scan
+      at startup; supersedes ADR-004's "fixed at startup" framing only
 
 ## 4. `secrets-core` (domain/core library)
 
@@ -145,6 +149,13 @@ This file is plain markdown, not rendered by `rust.tpl`.
       (`CreateCollection`/`CreateItem`/`SetSecret`/`Delete`/`SetAlias`) —
       deliberately deferred by ADR-004/ADR-013, tracked by
       [issue #8](https://github.com/noirbizarre/secrets/issues/8)
+- [x] 5.10 Live Secret Service topology — a background scan (periodic +
+      reactive on `Manager.Unlock`/`Lock`) reconciles `Collection`/`Item`
+      objects instead of a fixed, fatal, one-shot scan at startup; emits
+      the standard `CollectionCreated`/`CollectionDeleted`/`ItemCreated`/
+      `ItemDeleted` signals (`secret_service/refresh.rs`); supersedes
+      ADR-004's "fixed at startup" framing — see
+      [ADR-015](docs/adr/015-live-secret-service-topology.md)
 
 ## 6. `secrets-cli`
 

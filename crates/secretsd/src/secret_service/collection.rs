@@ -5,25 +5,29 @@ use std::sync::Arc;
 
 use zbus::zvariant::OwnedObjectPath;
 
-use super::KnownItem;
+use super::LiveTopology;
 use crate::state::DaemonState;
 
 /// One vault, exposed as a Secret Service collection.
 pub struct CollectionIface {
     state: Arc<DaemonState>,
     vault: String,
-    /// This vault's items, pre-filtered from the full topology snapshot.
-    items: Vec<KnownItem>,
+    /// Shared with `ServiceIface` and every other `CollectionIface` — see
+    /// [`LiveTopology`]. This vault's own items are filtered out of a
+    /// fresh snapshot on every call, rather than held as a
+    /// construction-time copy.
+    topology: LiveTopology,
 }
 
 impl CollectionIface {
-    /// Wrap a vault's known items as a servable collection.
+    /// Wrap a vault's name and the shared, live topology handle as a
+    /// servable collection.
     #[must_use]
-    pub fn new(state: Arc<DaemonState>, vault: String, items: Vec<KnownItem>) -> Self {
+    pub fn new(state: Arc<DaemonState>, vault: String, topology: LiveTopology) -> Self {
         Self {
             state,
             vault,
-            items,
+            topology,
         }
     }
 }
@@ -33,7 +37,13 @@ impl CollectionIface {
     /// This vault's items, as `Item` object paths.
     #[zbus(property)]
     fn items(&self) -> Vec<OwnedObjectPath> {
-        self.items.iter().map(|known| known.path.clone()).collect()
+        self.topology
+            .snapshot()
+            .items
+            .iter()
+            .filter(|known| known.vault == self.vault)
+            .map(|known| known.path.clone())
+            .collect()
     }
 
     /// The vault's name.
@@ -52,15 +62,18 @@ impl CollectionIface {
 
     /// Search this vault's items by attribute.
     fn search_items(&self, attributes: HashMap<String, String>) -> Vec<OwnedObjectPath> {
-        self.items
+        self.topology
+            .snapshot()
+            .items
             .iter()
             .filter(|known| {
-                attributes.iter().all(|(key, value)| match key.as_str() {
-                    "vault" => &known.vault == value,
-                    "item" => known.item.to_string() == *value,
-                    "field" => &known.field == value,
-                    _ => false,
-                })
+                known.vault == self.vault
+                    && attributes.iter().all(|(key, value)| match key.as_str() {
+                        "vault" => &known.vault == value,
+                        "item" => known.item.to_string() == *value,
+                        "field" => &known.field == value,
+                        _ => false,
+                    })
             })
             .map(|known| known.path.clone())
             .collect()

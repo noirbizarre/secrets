@@ -77,6 +77,15 @@ pub trait SecretService {
 
     /// Always rejected in this MVP (`NotSupported`).
     fn set_alias(&self, name: &str, collection: OwnedObjectPath) -> zbus::Result<()>;
+
+    /// Signalled by `secret_service::refresh::reconcile` when a new vault
+    /// is registered — see ADR-015.
+    #[zbus(signal)]
+    fn collection_created(&self, collection: OwnedObjectPath) -> zbus::Result<()>;
+
+    /// Signalled when a vault is unregistered — see ADR-015.
+    #[zbus(signal)]
+    fn collection_deleted(&self, collection: OwnedObjectPath) -> zbus::Result<()>;
 }
 
 /// `org.freedesktop.Secret.Collection`, one per vault — constructed with an
@@ -116,6 +125,16 @@ pub trait Collection {
 
     /// Always rejected in this MVP (`NotSupported`).
     fn delete(&self) -> zbus::Result<OwnedObjectPath>;
+
+    /// Signalled by `secret_service::refresh::reconcile` when a new field
+    /// is registered in this vault — see ADR-015.
+    #[zbus(signal)]
+    fn item_created(&self, item: OwnedObjectPath) -> zbus::Result<()>;
+
+    /// Signalled when a field is unregistered from this vault — see
+    /// ADR-015.
+    #[zbus(signal)]
+    fn item_deleted(&self, item: OwnedObjectPath) -> zbus::Result<()>;
 }
 
 /// `org.freedesktop.Secret.Item`, one per (vault, item, field) triple —

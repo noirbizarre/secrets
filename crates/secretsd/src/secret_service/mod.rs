@@ -7,13 +7,16 @@
 //! `secret://`-shaped operations this standard has no way to express — see
 //! [ADR-013](../../../../docs/adr/013-standard-secret-service-and-extension-namespace.md).
 //!
-//! See `docs/dbus/secret-service.md` for the full scope and its
-//! limitations, the most important being: **the object topology (which
-//! collections and items exist) is fixed at daemon startup.** If the vault
-//! file is created for the first time by `secrets unlock` while
-//! `secretsd` is already running, restart the daemon to pick up the new
-//! collections. `org.secrets.Manager` (what `secrets-cli` uses) has no
-//! such limitation, since it reads live state on every call.
+//! See `docs/dbus/secret-service.md` for the full scope. The object
+//! topology (which collections and items exist) is *live*, not fixed at
+//! startup (see [ADR-015](../../../../docs/adr/015-live-secret-service-topology.md)):
+//! [`refresh`] runs a background scan on a fixed interval, plus
+//! reactively whenever `org.secrets.Manager`'s `Unlock`/`Lock` is called,
+//! reconciling the registered `Collection`/`Item` objects and emitting the
+//! standard `CollectionCreated`/`CollectionDeleted`/`ItemCreated`/
+//! `ItemDeleted` signals. A backend error during any one scan never
+//! crashes the daemon or blocks startup — it just leaves the topology
+//! unchanged until the next scan succeeds.
 //!
 //! Read-only for now: `CreateCollection`/`CreateItem`/`SetSecret`/
 //! `Delete`/`SetAlias` all return `NotSupported` — tracked as follow-up
@@ -32,8 +35,11 @@
 pub mod collection;
 pub mod item;
 pub mod prompt;
+pub mod refresh;
 pub mod service;
 pub mod session;
+
+use std::sync::{Arc, Mutex};
 
 use secrets_core::ItemPath;
 use zbus::zvariant::OwnedObjectPath;
@@ -110,9 +116,11 @@ pub fn item_path(vault: &str, item: &ItemPath, field: &str) -> OwnedObjectPath {
         .expect("slug() always produces a valid object path segment")
 }
 
-/// One (vault, item, field) triple, and the fixed object path it was
-/// registered at — computed once at startup, since the object topology
-/// cannot change without a restart (see the module-level limitation note).
+/// One (vault, item, field) triple, and the object path it is currently
+/// registered at. Part of a [`Topology`] snapshot — the D-Bus object this
+/// describes can be added or removed by [`refresh::reconcile`] as the
+/// backend's own contents change, so this is a point-in-time fact, not a
+/// permanent one.
 #[derive(Debug, Clone)]
 pub struct KnownItem {
     /// The vault this field belongs to.
@@ -125,14 +133,50 @@ pub struct KnownItem {
     pub path: OwnedObjectPath,
 }
 
-/// A snapshot of every vault and (vault, item, field) triple that exists
-/// at daemon startup — the full set of objects registered on the bus.
+/// A snapshot of every vault and (vault, item, field) triple the backend
+/// reported the last time it was scanned — see [`LiveTopology`] for the
+/// shared, mutable handle every Secret Service interface object actually
+/// reads from.
 #[derive(Debug, Clone, Default)]
 pub struct Topology {
-    /// Every vault name, at startup.
+    /// Every vault name, as of the last scan.
     pub vaults: Vec<String>,
-    /// Every (vault, item, field) triple, at startup.
+    /// Every (vault, item, field) triple, as of the last scan.
     pub items: Vec<KnownItem>,
+}
+
+/// A [`Topology`] shared between every Secret Service interface object
+/// (`ServiceIface`, every `CollectionIface`) and the background refresher
+/// that keeps it current ([`refresh::spawn`]) — see
+/// [ADR-015](../../../../docs/adr/015-live-secret-service-topology.md).
+/// Replaces each interface holding its own frozen, construction-time
+/// snapshot. Cloning is cheap (an `Arc` clone); every clone observes the
+/// same underlying topology.
+#[derive(Clone)]
+pub struct LiveTopology(Arc<Mutex<Topology>>);
+
+impl LiveTopology {
+    /// Wrap an initial topology as shared, mutable state.
+    #[must_use]
+    pub fn new(initial: Topology) -> Self {
+        Self(Arc::new(Mutex::new(initial)))
+    }
+
+    /// A cloned snapshot of the topology as it stands right now — safe to
+    /// read from without holding the lock for the rest of a D-Bus method
+    /// call (which may itself take a while, e.g. decrypting a field).
+    #[must_use]
+    pub fn snapshot(&self) -> Topology {
+        self.0.lock().expect("poisoned").clone()
+    }
+
+    /// Replace the topology wholesale. Called only by
+    /// [`refresh::reconcile`], after the D-Bus object set has already been
+    /// updated to match — never by a Secret Service interface method
+    /// itself, which only ever reads via [`snapshot`](Self::snapshot).
+    pub(crate) fn replace(&self, new: Topology) {
+        *self.0.lock().expect("poisoned") = new;
+    }
 }
 
 /// Discover the current topology by walking every vault and item the

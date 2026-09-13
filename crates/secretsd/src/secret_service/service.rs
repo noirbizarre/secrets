@@ -6,40 +6,48 @@ use std::sync::Arc;
 
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
-use super::{PROMPT_PATH, SESSION_PATH, Secret, Topology, collection_path};
+use super::{LiveTopology, PROMPT_PATH, SESSION_PATH, Secret, Topology, collection_path};
 use crate::state::DaemonState;
 
 /// The root Secret Service object.
 pub struct ServiceIface {
     state: Arc<DaemonState>,
-    topology: Topology,
+    /// Shared with every `CollectionIface` and the background refresher —
+    /// see [`LiveTopology`]. Each method below takes its own
+    /// [`LiveTopology::snapshot`] rather than holding the lock for the
+    /// call's whole duration.
+    topology: LiveTopology,
 }
 
 impl ServiceIface {
-    /// Wrap daemon state and a topology snapshot as the root service
-    /// object.
+    /// Wrap daemon state and a shared, live topology handle as the root
+    /// service object.
     #[must_use]
-    pub fn new(state: Arc<DaemonState>, topology: Topology) -> Self {
+    pub fn new(state: Arc<DaemonState>, topology: LiveTopology) -> Self {
         Self { state, topology }
     }
+}
 
-    /// Items (across every vault) whose synthetic attributes are a
-    /// superset of `attributes` — see the module doc for what attributes
-    /// exist (`vault`, `item`, `field`).
-    fn matching_items(&self, attributes: &HashMap<String, String>) -> Vec<&super::KnownItem> {
-        self.topology
-            .items
-            .iter()
-            .filter(|known| {
-                attributes.iter().all(|(key, value)| match key.as_str() {
-                    "vault" => &known.vault == value,
-                    "item" => known.item.to_string() == *value,
-                    "field" => &known.field == value,
-                    _ => false,
-                })
+/// Items (across every vault) whose synthetic attributes are a superset of
+/// `attributes` — see the module doc for what attributes exist (`vault`,
+/// `item`, `field`). A free function, not a method, since it only ever
+/// needs a `Topology` snapshot already taken by its caller, not `&self`.
+fn matching_items<'t>(
+    topology: &'t Topology,
+    attributes: &HashMap<String, String>,
+) -> Vec<&'t super::KnownItem> {
+    topology
+        .items
+        .iter()
+        .filter(|known| {
+            attributes.iter().all(|(key, value)| match key.as_str() {
+                "vault" => &known.vault == value,
+                "item" => known.item.to_string() == *value,
+                "field" => &known.field == value,
+                _ => false,
             })
-            .collect()
-    }
+        })
+        .collect()
 }
 
 #[zbus::interface(name = "org.freedesktop.Secret.Service")]
@@ -48,6 +56,7 @@ impl ServiceIface {
     #[zbus(property)]
     fn collections(&self) -> Vec<OwnedObjectPath> {
         self.topology
+            .snapshot()
             .vaults
             .iter()
             .map(|name| collection_path(name))
@@ -95,8 +104,8 @@ impl ServiceIface {
         // daemon lock, so a 1Password session needing (re)authentication
         // reports matches as locked here too.
         let accessible_now = self.state.is_accessible();
-        let matches: Vec<OwnedObjectPath> = self
-            .matching_items(&attributes)
+        let topology = self.topology.snapshot();
+        let matches: Vec<OwnedObjectPath> = matching_items(&topology, &attributes)
             .into_iter()
             .map(|known| known.path.clone())
             .collect();
@@ -137,10 +146,10 @@ impl ServiceIface {
         items: Vec<OwnedObjectPath>,
         session: OwnedObjectPath,
     ) -> zbus::fdo::Result<HashMap<OwnedObjectPath, Secret>> {
+        let topology = self.topology.snapshot();
         let mut secrets = HashMap::new();
         for item_object_path in items {
-            let Some(known) = self
-                .topology
+            let Some(known) = topology
                 .items
                 .iter()
                 .find(|known| known.path == item_object_path)
@@ -168,7 +177,7 @@ impl ServiceIface {
     /// any. No other aliases are recognised in the MVP.
     fn read_alias(&self, name: &str) -> OwnedObjectPath {
         if name == "default"
-            && let Some(first) = self.topology.vaults.first()
+            && let Some(first) = self.topology.snapshot().vaults.first()
         {
             return collection_path(first);
         }
@@ -206,7 +215,10 @@ mod tests {
     }
 
     fn service_over(state: DaemonState) -> ServiceIface {
-        ServiceIface::new(Arc::new(state), topology_over_github_password())
+        ServiceIface::new(
+            Arc::new(state),
+            LiveTopology::new(topology_over_github_password()),
+        )
     }
 
     #[test]

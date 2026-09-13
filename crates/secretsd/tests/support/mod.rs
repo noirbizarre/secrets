@@ -16,8 +16,19 @@
 //! - `XDG_DATA_HOME`/`XDG_CONFIG_HOME`/`XDG_RUNTIME_DIR` all point inside
 //!   fresh [`tempfile::TempDir`]s, so `secretsd` never reads or writes a
 //!   real vault, config file or SSH agent socket.
-//! - No `secretsd.toml` is written, so the default (local, no external
-//!   credentials) backend is what starts — see `secretsd::config`.
+//! - No `secretsd.toml` is written by default, so the local backend (no
+//!   external credentials) is what starts unless a test explicitly opts
+//!   into a different one via [`TestDaemon::start_with_backend_config`] —
+//!   see `secretsd::config`.
+//!
+//! Shared by more than one test binary (`secret_service.rs`,
+//! `topology_refresh.rs`, ...), each of which `mod support;`s and compiles
+//! its own copy — so `dead_code` fires per binary for whichever items only
+//! the *other* one uses. Silenced crate-wide here rather than
+//! item-by-item, since which items are "unused" depends on which binary
+//! is compiling this module, not on this module itself (same convention
+//! as `crates/secrets-cli/tests/support/mod.rs`).
+#![allow(dead_code)]
 
 mod proxies;
 
@@ -83,24 +94,69 @@ impl TestDaemon {
     /// impossible to diagnose from CI alone.
     #[must_use]
     pub fn start() -> Self {
+        Self::start_with(true, None, &[])
+    }
+
+    /// Same as [`start`](Self::start), but does **not** seed the demo
+    /// vault first — `secretsd` starts with zero vaults, the same state a
+    /// fresh install is in before the very first `secrets unlock`. Used
+    /// to test the live topology refresher (ADR-015): since the Secret
+    /// Service object topology is no longer fixed at startup, a vault
+    /// created *after* `secretsd` is already running (exactly what
+    /// `Manager.Unlock` does on its very first call, for the local
+    /// backend) must become visible without a restart.
+    #[must_use]
+    pub fn start_without_a_vault() -> Self {
+        Self::start_with(false, None, &[])
+    }
+
+    /// Same as [`start_without_a_vault`](Self::start_without_a_vault), but
+    /// writes `secretsd.toml` with `config_contents` before starting
+    /// (selecting a non-local backend), and sets `extra_env` on the
+    /// spawned process — e.g. `SECRETS_OP_SDK_IPC_LIB`, to point the
+    /// 1Password backend at a fixture library instead of a real Desktop
+    /// installation. Used to test that a backend failing during topology
+    /// discovery never crashes `secretsd` itself (see
+    /// `topology_refresh.rs`, ADR-015).
+    #[must_use]
+    pub fn start_with_backend_config(config_contents: &str, extra_env: &[(&str, &str)]) -> Self {
+        Self::start_with(false, Some(config_contents), extra_env)
+    }
+
+    /// The shared implementation behind every `start*` constructor above.
+    fn start_with(
+        seed_vault: bool,
+        config_contents: Option<&str>,
+        extra_env: &[(&str, &str)],
+    ) -> Self {
         let data_dir = tempfile::tempdir().expect("create a temporary XDG_DATA_HOME");
         let config_dir = tempfile::tempdir().expect("create a temporary XDG_CONFIG_HOME");
         let runtime_dir = tempfile::tempdir().expect("create a temporary XDG_RUNTIME_DIR");
         secure_runtime_dir(runtime_dir.path());
 
-        // The Secret Service object topology is computed once, at
-        // `secretsd` startup (see `secretsd::secret_service`'s module
-        // doc) — so the demo collections must already exist on disk
-        // *before* the daemon starts. Vault/item/field *names* are
-        // readable even from a locked vault (`LocalBackend::list_vaults`/
-        // `list_items`), so seeding here does not also unlock the daemon
-        // that is about to start against this same file.
-        let vault_dir = data_dir.path().join("secrets");
-        std::fs::create_dir_all(&vault_dir).expect("create the vault file's parent directory");
-        secretsd::backend::local::LocalBackend::open(vault_dir.join("vault.toml"))
-            .expect("open a fresh vault file")
-            .unlock(DEMO_PASSPHRASE)
-            .expect("seed the demo vault on first unlock");
+        // The Secret Service topology is live (ADR-015), populated by a
+        // background scan shortly after startup rather than fixed before
+        // it — so, unlike before, seeding here is no longer a *hard*
+        // ordering requirement for the demo collections to eventually
+        // appear. It stays the default (`seed_vault = true`) for every
+        // existing test that still expects them present, to keep this
+        // harness's behavior otherwise unchanged.
+        if seed_vault {
+            let vault_dir = data_dir.path().join("secrets");
+            std::fs::create_dir_all(&vault_dir).expect("create the vault file's parent directory");
+            secretsd::backend::local::LocalBackend::open(vault_dir.join("vault.toml"))
+                .expect("open a fresh vault file")
+                .unlock(DEMO_PASSPHRASE)
+                .expect("seed the demo vault on first unlock");
+        }
+
+        if let Some(contents) = config_contents {
+            let config_subdir = config_dir.path().join("secrets");
+            std::fs::create_dir_all(&config_subdir)
+                .expect("create secretsd's own config directory");
+            std::fs::write(config_subdir.join("secretsd.toml"), contents)
+                .expect("write a secretsd.toml selecting the configured backend");
+        }
 
         let bus = PrivateBus::start();
 
@@ -118,6 +174,9 @@ impl TestDaemon {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        for (key, value) in extra_env {
+            command.env(key, value);
+        }
         let mut daemon = command.spawn().expect(
             "spawn the secretsd binary under test (CARGO_BIN_EXE_secretsd, set by cargo for \
              integration tests in this package)",
@@ -160,6 +219,37 @@ impl TestDaemon {
                 Instant::now() < deadline,
                 "secretsd did not become reachable on the private session bus within 10s; \
                  captured output so far:\n{}",
+                self.captured_output()
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Block until `Service.Collections()` matches `expected` exactly (as
+    /// a set), or panic after a few seconds. The live topology (ADR-015)
+    /// is populated by a background scan that starts immediately but
+    /// asynchronously to `secretsd` reporting ready — a test asserting on
+    /// specific collections must wait for it explicitly instead of
+    /// assuming it is already done the instant `start()`/`wait_until_ready`
+    /// returns.
+    ///
+    /// # Panics
+    ///
+    /// If `Service.Collections()` never matches `expected` within 10s.
+    pub fn wait_until_collections(&self, expected: &[OwnedObjectPath]) {
+        let expected: std::collections::HashSet<_> = expected.iter().cloned().collect();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Ok(collections) = self.service().collections() {
+                let collections: std::collections::HashSet<_> = collections.into_iter().collect();
+                if collections == expected {
+                    return;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Service.Collections() never matched the expected set within 10s; captured \
+                 output so far:\n{}",
                 self.captured_output()
             );
             thread::sleep(Duration::from_millis(20));

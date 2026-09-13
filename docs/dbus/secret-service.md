@@ -76,6 +76,19 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
   any; the same collection is also reachable directly at the literal
   `/org/freedesktop/secrets/aliases/default` object path (see the
   interfaces table above).
+- **Live topology** (see
+  [ADR-015](../adr/015-live-secret-service-topology.md)). The registered
+  `Collection`/`Item` object set is not fixed at startup: a background
+  scan runs immediately after `secretsd` starts, then every 30 seconds,
+  plus immediately whenever `org.secrets.Manager`'s `Unlock`/`Lock` is
+  called — so a vault or item appearing later (a new 1Password item, or
+  the local backend's vault file being created for the first time) becomes
+  visible **without restarting `secretsd`**. Already-connected clients are
+  notified via the standard `Service.CollectionCreated`/`CollectionDeleted`
+  and `Collection.ItemCreated`/`ItemDeleted` signals, not just new
+  connections that re-enumerate. `Service.CollectionChanged`/
+  `Collection.ItemChanged` are not implemented — nothing today diffs a
+  field's metadata distinctly from it being added or removed.
 
 ## What does not work (by design, in this MVP)
 
@@ -94,12 +107,6 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
   [`docs/architecture/external-clients.md`](../architecture/external-clients.md)).
   `Service.Unlock` therefore only reflects state `secrets unlock` already
   set; it cannot itself trigger a passphrase prompt.
-- **Dynamic topology.** Collections and items are registered once, at
-  `secretsd` startup, from whatever the backend reports at that moment.
-  Creating the vault file for the first time (via `secrets unlock`) while
-  `secretsd` is already running does not retroactively add its
-  collections — restart the daemon. `org.secrets.Manager` has no such
-  limitation.
 
 ## Errors
 

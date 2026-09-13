@@ -99,9 +99,6 @@ its password is.
   no way to opt out of this seeding.
 - **RSA agent signature algorithm negotiation is not honoured** — see
   [`docs/dbus/ssh-agent.md`](dbus/ssh-agent.md).
-- **The Secret Service compatibility layer's object topology is fixed at
-  daemon startup** — see
-  [`docs/dbus/secret-service.md`](dbus/secret-service.md).
 - **No signal-based graceful shutdown.** `secretsd` relies on the OS to
   reclaim its memory on termination; it does not currently intercept
   `SIGTERM` to zeroize state before exiting (see "Memory hygiene" above).
