@@ -7,6 +7,7 @@
 //! into something a caller can match on, without ever touching `zbus`
 //! itself.
 
+use secrets_core::SecretValue;
 use secrets_core::dbus::ManagerProxyBlocking;
 
 use crate::{Error, Result};
@@ -74,7 +75,11 @@ impl SecretsClient<'_> {
     }
 
     /// Fetch a field's value.
-    pub fn get(&self, uri: &str) -> Result<String> {
-        map(self.proxy.get(uri))
+    ///
+    /// Wrapped in [`SecretValue`] the instant it arrives from the wire, so
+    /// no caller of this crate can hold a bare, un-redacted `String` copy
+    /// of a secret without going out of their way to `expose_secret()` it.
+    pub fn get(&self, uri: &str) -> Result<SecretValue> {
+        map(self.proxy.get(uri)).map(SecretValue::new)
     }
 }

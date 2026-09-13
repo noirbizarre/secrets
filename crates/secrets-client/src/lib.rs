@@ -19,7 +19,7 @@
 //! # fn main() -> Result<(), secrets_client::Error> {
 //! let client = secrets_client::SecretsClient::connect()?;
 //! let value = client.get("secret://Personal/GitHub/password")?;
-//! println!("{value}");
+//! println!("{}", value.expose_secret());
 //! # Ok(())
 //! # }
 //! ```
@@ -40,6 +40,10 @@
 mod client;
 
 pub use client::SecretsClient;
+
+/// Re-exported so a caller of [`SecretsClient::get`] never has to add its
+/// own direct dependency on `secrets-core` just to name the return type.
+pub use secrets_core::SecretValue;
 
 /// This crate's error type.
 ///

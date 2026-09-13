@@ -2090,7 +2090,6 @@ dependencies = [
  "pretty_assertions",
  "rstest",
  "secrets-client",
- "secrets-core",
  "secretsd",
  "serde",
  "serde_json",
