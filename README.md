@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/icon.svg" alt="secrets" width="160">
+  <img src="docs/images/logo.svg" alt="secrets">
 </p>
 
 <h1 align="center">secrets</h1>

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:shaipe="https://shaipe.dev/ns/2026" width="256" height="256" viewBox="0 0 64 64"><defs>
+    <linearGradient id="gradPrimary" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#45D66F"/>
+      <stop offset="50%" stop-color="#18C7A5"/>
+      <stop offset="100%" stop-color="#3498DB"/>
+    </linearGradient>
+
+    <!-- Core lock + circuit symbol: one traced silhouette (hexagon, shackle,
+         3 circuit traces + nodes, keyhole), holes cut by reversed winding.
+         Unstyled (no fill/stroke here) so every variant's <use> controls
+         colour by overriding fill on the reference, incl. mark-base itself
+         for secrets-favicon; the group transform maps the trace's native
+         103.6..368.8 x 61.2..320.4 coordinate space onto this file's 64-unit
+         grid, matching the footprint the previous hand-built mark occupied. -->
+    <g id="mark-base">
+      <g transform="translate(-11.67,-8.74) scale(0.187)">
+        <path d="m 134.208,153.569 c -0.253,-27.855 -4.662,-55.009 15.673,-75.867 10.13,-10.437 24.011,-16.393 38.554,-16.544 13.727,-0.041 27.647,5.196 37.368,15.045 19.365,19.618 16.223,44.891 15.913,70.398 0.294,4.798 -0.466,6.394 3.392,9.64 5.688,4.784 11.926,7.335 18.149,11.714 11.923,-0.09 24.354,0.002 36.229,-0.317 17.469,-35.838 55.704,13.268 19.055,25.075 -6.525,2.102 -14.078,-3.535 -18.731,-7.806 -9.576,-0.079 -19.153,-0.104 -28.73,-0.074 l 0.04,26.319 c 20.898,-0.028 42.191,0.16 63.054,-0.123 30.745,-30.237 52.097,26.605 14.772,27.366 -5.304,0.108 -10.958,-5.552 -13.909,-9.609 -21.33,-0.296 -42.662,-0.311 -63.993,-0.045 l -0.023,26.18 28.753,-0.095 c 28.999,-25.346 43.451,9.968 23.931,27.144 -8.666,7.624 -19.088,-1.848 -24.738,-10.017 l -27.583,-0.701 c -17.864,13.218 -62.57,37.746 -82.774,49.125 -14.549,-6.534 -34.094,-19.087 -48.407,-27.232 -8.523,-4.85 -28.829,-16.338 -35.7,-21.727 -0.675,-3.383 -0.685,-3.661 -0.411,-7.122 -0.992,-29.26 -0.171,-63.285 -0.117,-92.922 12.908,-6.193 18.572,-9.937 30.233,-17.805 z m -13.33,99.08 0.262,9.102 c 21.764,13.76 45.685,26.229 66.572,40.309 22.137,-13.31 44.418,-26.38 66.839,-39.209 -1.651,-16.828 -0.494,-60.899 -0.477,-79.857 -6.415,-3.813 -28.174,-15.903 -32.263,-19.315 -10.649,-5.693 -22.868,-12.479 -33.157,-18.742 -22.211,11.453 -46.054,25.917 -67.65,38.835 -0.024,22.287 0.48,46.784 -0.126,68.877 z m 192.773,-82.226 c -2.529,1.214 -3.605,4.24 -2.411,6.779 1.194,2.538 4.212,3.638 6.759,2.465 2.577,-1.187 3.692,-4.247 2.485,-6.814 -1.208,-2.567 -4.276,-3.658 -6.833,-2.43 z m 38.817,54.901 c 1.865,-0.547 3.275,-2.08 3.665,-3.985 0.39,-1.904 -0.304,-3.868 -1.804,-5.104 -1.5,-1.237 -3.56,-1.544 -5.355,-0.798 -2.576,1.07 -3.866,3.968 -2.936,6.598 0.929,2.631 3.753,4.075 6.43,3.289 z m -33.975,44.58 c 2.598,-1.503 3.472,-4.836 1.945,-7.421 -1.527,-2.584 -4.868,-3.427 -7.438,-1.877 -2.538,1.53 -3.368,4.819 -1.861,7.371 1.507,2.551 4.789,3.411 7.354,1.927 z m -95.998,-129.04 c 0.18,-17.874 2.919,-38.621 -10.533,-51.788 -6.48,-6.344 -16.591,-10.412 -25.593,-10.156 -0.798,0.025 -1.595,0.066 -2.391,0.122 -36.329,12.099 -31.354,32.56 -31.12,65.352 6.245,-3.833 31.308,-20.628 36.942,-19.585 12.11,6.684 19.791,11.061 32.695,16.055 z M 184.191,191.157 c 7.96,-0.433 14.963,1.264 20.294,7.629 3.788,4.57 5.434,10.545 4.52,16.411 -1.179,8.048 -5.019,11.823 -11.017,16.29 1.262,8.599 3.681,19.014 1.458,27.162 -2.781,2.847 -1.928,1.933 -7.196,2.247 -25.573,0.821 -17.646,-7.824 -14.65,-29.055 -16.175,-14.781 -14.729,-32.742 6.591,-40.684 z"/>
+      </g>
+    </g>
+  </defs><symbol id="secrets-mark" viewBox="0 0 64 64">
+    <use href="#mark-base" fill="url(#gradPrimary)" stroke="url(#gradPrimary)"/>
+  </symbol><symbol id="secrets-logo" viewBox="0 0 178 54">
+    <use href="#mark-base" fill="url(#gradPrimary)" stroke="url(#gradPrimary)"/>
+    <text x="68" y="41" font-family="Inter, system-ui, sans-serif"
+      font-weight="700" font-size="30" letter-spacing="-1" fill="#1A1A2E">secrets</text>
+  </symbol><symbol id="secrets-logo-tagline" viewBox="0 0 300 90">
+    <use href="#mark-base" transform="translate(0,13)" fill="url(#gradPrimary)" stroke="url(#gradPrimary)"/>
+    <text x="68" y="54" font-family="Inter, system-ui, sans-serif"
+      font-weight="700" font-size="30" letter-spacing="-1" fill="#1A1A2E">secrets</text>
+    <text x="69" y="74" font-family="Inter, system-ui, sans-serif"
+      font-weight="500" font-size="13" letter-spacing="0" fill="#6B7280">Your secrets. Your control.</text>
+  </symbol><symbol id="secrets-wordmark" viewBox="0 0 140 48">
+    <text x="2" y="34" font-family="Inter, system-ui, sans-serif"
+      font-weight="700" font-size="34" letter-spacing="-1" fill="#1A1A2E">secrets</text>
+  </symbol><symbol id="secrets-mark-monochrome" viewBox="0 0 64 64">
+    <use href="#mark-base" fill="currentColor" stroke="currentColor" color="#6b7280"/>
+  </symbol><symbol id="secrets-logo-monochrome" viewBox="0 0 178 54">
+    <use href="#mark-base" fill="currentColor" stroke="currentColor" color="#6b7280"/>
+    <text x="68" y="41" font-family="Inter, system-ui, sans-serif"
+      font-weight="700" font-size="30" letter-spacing="-1" fill="currentColor" color="#6b7280">secrets</text>
+  </symbol><symbol id="secrets-mark-dark" viewBox="0 0 64 64">
+    <use href="#mark-base" fill="#FFFFFF" stroke="#FFFFFF"/>
+  </symbol><symbol id="secrets-mark-light" viewBox="0 0 64 64">
+    <use href="#mark-base" fill="url(#gradPrimary)" stroke="url(#gradPrimary)"/>
+  </symbol><symbol id="secrets-favicon" viewBox="0 0 64 64">
+    <use href="#mark-base" fill="url(#gradPrimary)"/>
+  </symbol><symbol id="secrets-app-icon" viewBox="1.5 -5 66 66">
+    <use href="#mark-base" fill="url(#gradPrimary)" stroke="url(#gradPrimary)"/>
+  </symbol><symbol id="secrets-app-icon-bg" viewBox="1.5 -5 66 66">
+    <rect x="1.5" y="-5" width="66" height="66" rx="14" fill="#12121A"/>
+    <use href="#mark-base" fill="url(#gradPrimary)" stroke="url(#gradPrimary)"/>
+  </symbol><use href="#secrets-mark"/></svg>
