@@ -41,7 +41,7 @@ signature = "2"
 ssh-agent-lib = "0.6.0"
 ssh-key = { version = "0.6.7", features = ["rand_core"] }
 thiserror = "2.0.20"
-tokio = { version = "1.53.1", features = ["rt", "net", "rt-multi-thread", "fs"] }
+tokio = { version = "1.53.1", features = ["rt", "net", "fs"] }
 toml = "1.1.4"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

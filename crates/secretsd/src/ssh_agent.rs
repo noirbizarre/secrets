@@ -123,7 +123,14 @@ impl Session for SecretsAgent {
 /// Spawns its own thread and `tokio` runtime; the caller does not need one.
 pub fn spawn(state: Arc<DaemonState>, socket_path: PathBuf) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        let runtime = match tokio::runtime::Runtime::new() {
+        // A current-thread runtime, not the multi-threaded default: this
+        // agent has no CPU-bound or parallel work, only I/O-bound waiting
+        // on the socket, so a worker pool would just be idle threads this
+        // component doesn't need (see ADR-007's "one extra thread" intent).
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(runtime) => runtime,
             Err(error) => {
                 tracing::error!("SSH agent: could not start its runtime: {error}");
