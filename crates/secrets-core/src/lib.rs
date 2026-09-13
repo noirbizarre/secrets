@@ -25,8 +25,9 @@
 #![warn(missing_docs)]
 // `CoreError` carries enough context to be actionable (the point of
 // AGENTS.md's rule on diagnostics), which puts it past clippy's 128-byte
-// `Result` threshold. See the same allow in secretsd, secrets-client and
-// secrets-cli.
+// `Result` threshold. See the same allow in secrets-client and
+// secrets-cli (secretsd's own DaemonError sits under the threshold, so
+// it doesn't need it — yet).
 #![allow(clippy::result_large_err)]
 
 pub mod backend;
