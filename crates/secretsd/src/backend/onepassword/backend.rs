@@ -327,7 +327,17 @@ impl Backend for OnePasswordBackend {
             .map_err(CallError::from)
             .map_err(|error| map_resolve_error(vault, item, field, error))?;
 
-        let secret = protocol::parse_resolved_secret(response.as_bytes())
+        // This response's raw bytes carry the actual secret value being
+        // requested — the single most sensitive payload this backend ever
+        // handles, more so than the metadata batch in `list_items` above.
+        // Same best-effort mitigation applies: zeroize the local copy
+        // immediately after parsing (`ipc::Response`'s own backing buffer
+        // is not zeroized on drop today — a known limitation, documented
+        // in docs/security.md).
+        let mut raw_bytes = response.as_bytes().to_vec();
+        let parsed = protocol::parse_resolved_secret(&raw_bytes);
+        raw_bytes.zeroize();
+        let secret = parsed
             .map_err(CallError::from)
             .map_err(|error| map_resolve_error(vault, item, field, error))?;
         Ok(SecretValue::new(secret.expose_secret().to_string()))
