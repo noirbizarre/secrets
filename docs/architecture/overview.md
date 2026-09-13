@@ -107,7 +107,5 @@ reasoning; in short:
 
 Dependencies point one way: `secretsd` depends on `secrets-core` directly;
 `secrets-cli` depends on `secrets-client`, which itself depends on
-`secrets-core`, and (since [ADR-014](../adr/014-cli-secret-disclosure-modes.md))
-also on `secrets-core` directly, for the shared `SecretValue` type only.
-`secrets-client` never depends on `secretsd`, and `secretsd` never depends
-on either client crate.
+`secrets-core`. `secrets-client` never depends on `secretsd`, and
+`secretsd` never depends on either client crate.

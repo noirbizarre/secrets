@@ -56,10 +56,11 @@ Four crates and one protocol boundary, one workspace:
   `secrets-core` only.
 - **`crates/secrets-cli`** — the CLI binary (`secrets`). A thin client
   with no vault or session state of its own; every operation is a call
-  through `secrets-client` into `secretsd`. It depends on `secrets-client`
-  for that call path (see ADR-010); [ADR-014](014-cli-secret-disclosure-modes.md)
-  later added a direct `secrets-core` dependency too, used only for the
-  shared `SecretValue` type, not to resolve secrets directly.
+  through `secrets-client` into `secretsd`. It depends on `secrets-client`,
+  not on `secrets-core` directly (see ADR-010): `secrets-client` re-exports
+  `SecretValue`, so the CLI's `secret://` disclosure modes
+  ([ADR-014](014-cli-secret-disclosure-modes.md)) need no dependency of
+  their own on `secrets-core`.
 - **The D-Bus protocol** (`org.secrets.Manager` plus the Secret Service
   compatibility interfaces) — the stable IPC contract between `secretsd`
   and every client, documented as a first-class boundary in
@@ -78,12 +79,10 @@ secrets-core
     +-- secretsd
     |
     +-- secrets-client
-    |       ^
-    |       |
-    |       +-- secrets CLI
-    |       +-- (future) external Rust applications
-    |
-    +-- secrets CLI (direct, for SecretValue only — see ADR-014)
+            ^
+            |
+            +-- secrets CLI
+            +-- (future) external Rust applications
 ```
 
 No cross-dependency: `secretsd` never depends on `secrets-client` or
