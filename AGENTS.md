@@ -27,8 +27,8 @@ checks is a comment, and it will be violated.
    `secrets_core::resolver::tests::resolving_an_unknown_field_reports_not_found_without_the_value`
    and `secrets_core::dbus::tests`.
 2. **`secrets-cli` holds no vault or session state** — every command in
-   `crates/secrets-cli/src/lib.rs` goes through `client::Client`, never
-   reads a vault file. See ADR-010.
+   `crates/secrets-cli/src/lib.rs` goes through `secrets_client::SecretsClient`
+   (aliased `Client` there), never reads a vault file. See ADR-010.
 3. **Locking is daemon-wide and lives in exactly one place**
    (`secretsd::state::DaemonState`) — every interface (`org.secrets.Manager`,
    the Secret Service objects, the SSH agent) reads the same
