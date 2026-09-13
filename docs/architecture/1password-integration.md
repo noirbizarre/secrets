@@ -25,7 +25,7 @@ end.
 secretsd
    |
    v
-OnePasswordBackend        (crates/secretsd/src/backend/onepassword/, ADR-0008/0011)
+OnePasswordBackend        (crates/secretsd/src/backend/onepassword/, ADR-008/011)
    |
    v
 secretsd's own IPC client   (crates/secretsd/src/backend/onepassword/{ffi,ipc,protocol,session}.rs)
@@ -40,7 +40,7 @@ libop_sdk_ipc_client.so    (dynamically loaded, never bundled — Step 5)
 `secret://Personal/GitHub/password` maps internally to 1Password's own
 `op://Personal/GitHub/password`-shaped addressing *inside*
 `OnePasswordBackend` only — never on the public `secret://`/D-Bus
-surface (per the task's constraints and ADR-0002/0005).
+surface (per the task's constraints and ADR-002/005).
 
 ## Environment this was investigated against
 

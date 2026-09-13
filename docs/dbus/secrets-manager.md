@@ -62,7 +62,7 @@ field's *value*. Requires the store to be unlocked (confirming a field
 exists is itself information about unlocked contents). Fails with
 `InvalidUri` if `uri` does not parse, `VaultLocked` if the store is
 locked, `BackendRequiresAuthentication` if the active backend has its own
-unmet session requirement (see ADR-0011), or `NotFound` if it does not
+unmet session requirement (see ADR-011), or `NotFound` if it does not
 resolve.
 
 Implemented internally by `DaemonState::validate_reference` — named
@@ -95,7 +95,7 @@ parsing a message string:
 | `org.secrets.Error.PermissionDenied`     | Not allowed (includes a wrong passphrase) |
 | `org.secrets.Error.InvalidOperation`     | The operation does not make sense here    |
 | `org.secrets.Error.BackendUnavailable`   | The backend could not be reached          |
-| `org.secrets.Error.BackendRequiresAuthentication` | The backend has its own unmet session/auth requirement (see ADR-0011) |
+| `org.secrets.Error.BackendRequiresAuthentication` | The backend has its own unmet session/auth requirement (see ADR-011) |
 
 None of these ever include a secret's value in their message — see
 [`docs/security.md`](../security.md).
