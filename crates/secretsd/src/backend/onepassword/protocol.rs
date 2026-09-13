@@ -21,6 +21,7 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::ipc::Request;
 
@@ -295,7 +296,10 @@ pub fn parse_invoke_response<T: serde::de::DeserializeOwned>(
 /// the value — the one thing this whole integration exists to protect —
 /// mirroring `secrets_core::SecretValue`'s discipline without depending
 /// on `secrets_core` (this module stays isolated from it, per the task's
-/// own constraint).
+/// own constraint). `Zeroize`/`ZeroizeOnDrop` for the same reason
+/// `SecretValue`/`VaultKey` carry them: a plaintext's lifetime must be
+/// bounded by its owner's scope, not left to the allocator.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct ResolvedSecret(String);
 
 impl ResolvedSecret {
