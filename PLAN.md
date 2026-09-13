@@ -92,6 +92,15 @@ This file is plain markdown, not rendered by `rust.tpl`.
       — Standard Secret Service as the primary contract, `org.secrets.*`
       as extensions; also closes the gap where `org.freedesktop.secrets`
       was never requested as a bus name
+- [x] 3.12 [ADR-011](docs/adr/011-backend-session-and-authentication-state.md)
+      — Backend session and authentication state: `Arc<dyn Backend>` plus
+      an optional `Arc<dyn BackendSession>`, so locking can vary per backend
+      without `DaemonState` losing its status as sole lock authority
+- [x] 3.13 [ADR-012](docs/adr/012-1password-desktop-backend.md) — 1Password
+      Desktop backend via its native app-integration IPC, not the `op` CLI
+- [x] 3.14 [ADR-014](docs/adr/014-cli-secret-disclosure-modes.md) —
+      `secrets get`'s output modes (`--raw`/`--json`/`--clipboard`) and its
+      default refusal to print a bare value to a terminal
 
 ## 4. `secrets-core` (domain/core library)
 
