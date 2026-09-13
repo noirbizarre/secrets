@@ -4,7 +4,8 @@
 //! (`lib.rs`) is another. `secrets inject`/`run`/`totp` are declared with
 //! their eventual shape so `--help` and scripts can already depend on the
 //! surface, but each currently returns
-//! [`crate::error::CliError::NotYetImplemented`].
+//! [`crate::error::CliError::NotYetImplemented`]. `--verbose` is reserved
+//! the same way: parsed today, but not yet wired to any logging output.
 
 use clap::{Args, Parser, Subcommand};
 
@@ -13,6 +14,9 @@ use clap::{Args, Parser, Subcommand};
 #[command(name = "secrets", version, about, long_about = None)]
 pub struct Cli {
     /// Increase verbosity. Repeat for more.
+    ///
+    /// Reserved: accepted and counted, but this crate has no logging
+    /// infrastructure yet, so no flag value currently changes any output.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
