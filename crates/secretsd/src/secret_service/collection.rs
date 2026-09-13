@@ -42,10 +42,12 @@ impl CollectionIface {
         self.vault.clone()
     }
 
-    /// Whether the daemon (and so every vault) is currently locked.
+    /// Whether this vault is currently readable — reflects both the
+    /// daemon-wide lock and the active backend's own session state; see
+    /// [`crate::state::DaemonState::is_accessible`].
     #[zbus(property)]
     fn locked(&self) -> bool {
-        !self.state.is_unlocked()
+        !self.state.is_accessible()
     }
 
     /// Search this vault's items by attribute.

@@ -20,3 +20,6 @@ pub mod paths;
 pub mod secret_service;
 pub mod ssh_agent;
 pub mod state;
+
+#[cfg(test)]
+pub(crate) mod test_support;

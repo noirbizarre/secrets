@@ -58,8 +58,17 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
   `item` or `field` attribute (see `Item.Attributes` below).
 - `Item.GetSecret`, `Service.GetSecrets` — read a field's value, subject to
   lock state.
-- `Item.Locked`, `Collection.Locked` — reflect the daemon-wide lock state
-  live, on every property read.
+- `Item.Locked`, `Collection.Locked` — reflect **both** the daemon-wide
+  lock state and the active backend's own session state (see
+  [ADR-011](../adr/011-backend-session-and-authentication-state.md)),
+  live, on every property read. For a backend with no session concept of
+  its own (the local backend), only the daemon lock matters, same as
+  before. For 1Password Desktop, whose "unlock" *is* its own session (see
+  [`docs/backends/1password.md`](../backends/1password.md)), an object
+  reports locked whenever that session needs (re)authentication or is
+  unavailable — even though the daemon-wide lock itself is always
+  "unlocked" for that backend. `Service.SearchItems`/`GetSecrets` and the
+  SSH agent follow the same rule.
 - `Item.Attributes` — a synthetic `{"vault": ..., "item": ..., "field":
   ...}` map (there is no Secret-Service-native concept of a
   vault/item/field triple to draw richer attributes from).

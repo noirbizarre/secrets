@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use secrets_core::{
-    Backend, BackendSession, BackendStatus, CoreError, Item, Resolver, SecretUri, SecretValue,
-    Vault,
+    Backend, BackendSession, BackendStatus, CoreError, Item, ItemPath, Resolver, SecretUri,
+    SecretValue, Vault,
 };
 
 use crate::backend::local::LocalBackend;
@@ -254,14 +254,64 @@ impl DaemonState {
         Resolver::new(self.backend.as_ref()).resolve(uri)
     }
 
-    /// Access the underlying backend directly — used by the SSH agent and
-    /// the Secret Service compatibility layer, which need to enumerate and
-    /// decrypt fields themselves rather than through a single `secret://`
-    /// URI. Returns the trait object, not the concrete local backend: both
-    /// call sites only ever call [`Backend::get_field`].
+    /// Access the underlying backend directly — used to enumerate vaults/
+    /// items (`list_vaults`/`list_items`), which are available regardless
+    /// of lock state. For reading a field's *value*, use
+    /// [`DaemonState::read_field`] instead: it applies the same
+    /// lock/session gating as [`DaemonState::get`], which calling
+    /// [`Backend::get_field`] directly on this handle would bypass.
     #[must_use]
     pub fn backend(&self) -> &Arc<dyn Backend> {
         &self.backend
+    }
+
+    /// Whether a read can happen right now: both the daemon-wide lock
+    /// ([`LockController::is_unlocked`]) and the active backend's own
+    /// session ([`check_backend_session`](Self::check_backend_session)), if
+    /// it has one.
+    ///
+    /// The single answer to "is this readable", shared by every surface
+    /// that needs it (the Secret Service compatibility layer, the SSH
+    /// agent) so none of them can drift from `get`/`validate_reference`'s
+    /// own gating — see the invariant this trait's doc comment describes.
+    #[must_use]
+    pub fn is_accessible(&self) -> bool {
+        self.is_unlocked() && self.check_backend_session().is_ok()
+    }
+
+    /// Fetch one (vault, item, field) triple's value directly, applying the
+    /// same lock/session gating as [`DaemonState::get`].
+    ///
+    /// Used by callers that already have a (vault, item, field) triple in
+    /// hand rather than a `secret://` URI — the Secret Service compatibility
+    /// layer (one Secret Service `Item` per triple) and the SSH agent
+    /// (iterating `SshKey` fields directly). Both used to call
+    /// `self.backend().get_field(...)` straight through, which skipped
+    /// [`check_backend_session`](Self::check_backend_session) entirely: for
+    /// a backend using [`AlwaysUnlocked`] (1Password Desktop), that meant a
+    /// `RequiresAuthentication`/`SessionExpired`/`Unavailable` session was
+    /// never reported as "locked" on those surfaces — see #7.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::VaultLocked`] if the store is locked,
+    /// [`CoreError::BackendRequiresAuthentication`] or
+    /// [`CoreError::BackendUnavailable`] if the backend's own session
+    /// blocks it (see [`check_backend_session`](Self::check_backend_session)),
+    /// or propagates the backend's error otherwise.
+    pub fn read_field(
+        &self,
+        vault: &str,
+        item: &ItemPath,
+        field: &str,
+    ) -> std::result::Result<SecretValue, CoreError> {
+        if !self.is_unlocked() {
+            return Err(CoreError::VaultLocked {
+                vault: vault.to_string(),
+            });
+        }
+        self.check_backend_session()?;
+        self.backend.get_field(vault, item, field)
     }
 }
 
@@ -310,47 +360,9 @@ pub fn open_default_state() -> Result<DaemonState> {
 
 #[cfg(test)]
 mod tests {
-    use tempfile::tempdir;
+    use crate::test_support::{state_over_fresh_vault, state_with_backend_session};
 
     use super::*;
-
-    /// Builds a `DaemonState` the same way `open_default_state` does,
-    /// against a throwaway vault file, so these tests exercise the exact
-    /// `Arc<dyn Backend>` + `Arc<dyn LockController>` wiring production
-    /// code uses. No backend session (matches the local backend, which
-    /// has none).
-    fn state_over_fresh_vault() -> (tempfile::TempDir, DaemonState) {
-        let dir = tempdir().unwrap();
-        let local = Arc::new(LocalBackend::open(dir.path().join("vault.toml")).unwrap());
-        let backend: Arc<dyn Backend> = local.clone();
-        let lock_controller: Arc<dyn LockController> = local;
-        (dir, DaemonState::new(backend, lock_controller, None))
-    }
-
-    /// A fixture [`BackendSession`] whose reported status is set by the
-    /// test, so `check_backend_session`'s gating can be exercised without
-    /// a real external backend.
-    struct FixedSession(BackendStatus);
-
-    impl BackendSession for FixedSession {
-        fn backend_status(&self) -> BackendStatus {
-            self.0
-        }
-    }
-
-    /// Same as [`state_over_fresh_vault`], but with a backend session
-    /// fixture attached, reporting `status`.
-    fn state_with_backend_session(status: BackendStatus) -> (tempfile::TempDir, DaemonState) {
-        let dir = tempdir().unwrap();
-        let local = Arc::new(LocalBackend::open(dir.path().join("vault.toml")).unwrap());
-        let backend: Arc<dyn Backend> = local.clone();
-        let lock_controller: Arc<dyn LockController> = local;
-        let session: Arc<dyn BackendSession> = Arc::new(FixedSession(status));
-        (
-            dir,
-            DaemonState::new(backend, lock_controller, Some(session)),
-        )
-    }
 
     #[test]
     fn always_unlocked_reports_unlocked_and_ignores_lock_unlock_calls() {
@@ -467,5 +479,53 @@ mod tests {
         let uri = SecretUri::parse("secret://Personal/GitHub/password").unwrap();
         assert!(state.get(&uri).is_ok());
         assert!(state.validate_reference(&uri).is_ok());
+    }
+
+    #[test]
+    fn is_accessible_reflects_both_the_daemon_lock_and_the_backend_session() {
+        // Regression guard for #7: `is_accessible` is what the Secret
+        // Service layer and the SSH agent now consult instead of the
+        // daemon lock alone — it must answer "no" for every reason a read
+        // could fail, not just a locked daemon.
+        let (_dir, locked) = state_over_fresh_vault();
+        assert!(!locked.is_accessible(), "a fresh, never-unlocked store");
+
+        let (_dir, unlocked) = state_over_fresh_vault();
+        unlocked.unlock("test passphrase").unwrap();
+        assert!(unlocked.is_accessible(), "unlocked, no backend session");
+
+        let (_dir, needs_auth) = state_with_backend_session(BackendStatus::RequiresAuthentication);
+        needs_auth.unlock("test passphrase").unwrap();
+        assert!(
+            !needs_auth.is_accessible(),
+            "daemon unlocked but backend session requires authentication"
+        );
+
+        let (_dir, authenticated) = state_with_backend_session(BackendStatus::Authenticated);
+        authenticated.unlock("test passphrase").unwrap();
+        assert!(authenticated.is_accessible());
+    }
+
+    #[test]
+    fn read_field_applies_the_same_gating_as_get() {
+        let item = ItemPath::new(vec!["GitHub".to_string()]).unwrap();
+
+        let (_dir, locked) = state_over_fresh_vault();
+        let error = locked
+            .read_field("Personal", &item, "password")
+            .unwrap_err();
+        assert!(matches!(error, CoreError::VaultLocked { .. }));
+
+        let (_dir, needs_auth) = state_with_backend_session(BackendStatus::RequiresAuthentication);
+        needs_auth.unlock("test passphrase").unwrap();
+        let error = needs_auth
+            .read_field("Personal", &item, "password")
+            .unwrap_err();
+        assert!(matches!(error, CoreError::BackendRequiresAuthentication(_)));
+
+        let (_dir, unlocked) = state_over_fresh_vault();
+        unlocked.unlock("test passphrase").unwrap();
+        let value = unlocked.read_field("Personal", &item, "password").unwrap();
+        assert_eq!(value.expose_secret(), "correct horse battery staple");
     }
 }
