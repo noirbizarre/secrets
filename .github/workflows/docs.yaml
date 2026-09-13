@@ -43,6 +43,8 @@ jobs:
     name: 🚀 Deploy
     needs: build
     runs-on: ubuntu-latest
+    # Pages deployments are only allowed from public repositories, so we skip this job for private repos.
+    if: github.event.repository.visibility == 'public'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
