@@ -6,6 +6,7 @@
 //! never needs a terminal check, since names are not secret material
 //! (`docs/security.md`); a secret's value (`get`) does.
 
+use secrets_client::FieldDisplay;
 use serde::Serialize;
 
 use crate::error::CliError;
@@ -95,6 +96,23 @@ pub struct GetPayload<'a> {
     pub uri: &'a str,
     /// The field's value.
     pub value: &'a str,
+}
+
+/// `show --json`'s shape: one entry per field, in the item's own field
+/// order — no client-side reordering, same precedent as `list`.
+///
+/// Built directly from [`FieldDisplay`], not a bespoke struct: unlike
+/// `GetPayload`, there is no `SecretValue` to keep out of this type's
+/// reach — a secret-shaped field's `value` is already the fixed
+/// obfuscated placeholder by the time it reaches here (see
+/// `secrets_core::dbus::OBFUSCATED_FIELD_PLACEHOLDER`), substituted
+/// server-side before it ever crossed the bus.
+#[derive(Serialize)]
+pub struct ShowPayload<'a> {
+    /// The item reference that was shown.
+    pub uri: &'a str,
+    /// The item's fields, in the order the backend reported them.
+    pub fields: &'a [FieldDisplay],
 }
 
 #[cfg(test)]

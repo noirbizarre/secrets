@@ -8,8 +8,8 @@
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use secrets_core::SecretUri;
-use secrets_core::dbus::ManagerError;
+use secrets_core::dbus::{FieldDisplay, ManagerError};
+use secrets_core::{ItemUri, SecretUri};
 
 use crate::error::DaemonError;
 use crate::state::DaemonState;
@@ -102,5 +102,12 @@ impl ManagerIface {
             SecretUri::parse(uri).map_err(|error| ManagerError::InvalidUri(error.to_string()))?;
         let value = self.state.get(&parsed)?;
         Ok(value.expose_secret().to_string())
+    }
+
+    /// See [`secrets_core::dbus::Manager::show_item`].
+    fn show_item(&self, item_uri: &str) -> Result<Vec<FieldDisplay>, ManagerError> {
+        let parsed = ItemUri::parse(item_uri)
+            .map_err(|error| ManagerError::InvalidUri(error.to_string()))?;
+        Ok(self.state.show_item(&parsed)?)
     }
 }

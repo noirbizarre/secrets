@@ -121,12 +121,17 @@ This file is plain markdown, not rendered by `rust.tpl`.
       daemon boundary (`error.rs`, `dbus.rs`)
 - [x] 4.7 Unit tests: URI parsing, validation, escaping, resolution (27
       tests)
+- [x] 4.8 `ItemUri` (item-level `secret://<vault>/<item...>` reference,
+      no field), `FieldKind::is_secret`/`Display`/`FromStr`, and the
+      `FieldDisplay` wire type + `OBFUSCATED_FIELD_PLACEHOLDER` constant
+      — for `Manager.ShowItem` (`uri.rs`, `model.rs`, `dbus.rs`; see
+      [ADR-016](docs/adr/016-show-command-and-field-value-obfuscation.md))
 
 ## 5. `secretsd` (daemon)
 
 - [x] 5.1 D-Bus service bootstrap (`zbus::blocking`, `main.rs`)
 - [x] 5.2 `org.secrets.Manager`: Get / Resolve / List / Lock / Unlock /
-      Status (`manager.rs`)
+      Status / ShowItem (`manager.rs`)
 - [x] 5.3 Secret Service compat: Service / Collection / Item / Session /
       Prompt, plain algorithm (`secret_service/`)
 - [x] 5.4 Session & lock state machine (Locked / Unlocked) (`state.rs`)
@@ -170,6 +175,10 @@ This file is plain markdown, not rendered by `rust.tpl`.
       crate (`config.rs`)
 - [x] 6.6 CLI integration tests (`assert_cmd`, against a test daemon) — see
       §9.5
+- [x] 6.7 `secrets show` — list an item's fields (name, kind, value),
+      secret-shaped values obfuscated server-side; requires unlock, no
+      terminal-disclosure refusal (unlike `get`) — see
+      [ADR-016](docs/adr/016-show-command-and-field-value-obfuscation.md)
 
 ## 7. Backends
 

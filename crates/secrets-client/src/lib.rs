@@ -45,6 +45,11 @@ pub use client::SecretsClient;
 /// own direct dependency on `secrets-core` just to name the return type.
 pub use secrets_core::SecretValue;
 
+/// Re-exported so a caller of [`SecretsClient::show_item`] never has to
+/// add its own direct dependency on `secrets-core` just to name the
+/// return type.
+pub use secrets_core::dbus::FieldDisplay;
+
 /// This crate's error type.
 ///
 /// Re-exported from [`secrets_core::dbus::ManagerError`] rather than

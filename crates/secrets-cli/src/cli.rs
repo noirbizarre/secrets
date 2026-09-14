@@ -72,6 +72,26 @@ pub enum Command {
         json: bool,
     },
 
+    /// Show every field an item has: its name, kind, and value if the
+    /// kind isn't secret-shaped.
+    ///
+    /// Fields whose kind is secret-shaped (`password`, `totp`,
+    /// `ssh-key`, `private-key`, `note`, any custom field) always show a
+    /// fixed placeholder instead of their real value — this command
+    /// exists to discover *which* fields an item has, not to read them;
+    /// use `get` for that. No terminal-disclosure refusal applies here
+    /// (unlike `get`): no real secret material ever reaches this
+    /// command.
+    Show {
+        /// A `secret://<vault>/<item...>` reference — no field segment.
+        uri: String,
+
+        /// Print as a JSON array of `{"name", "kind", "value"}` objects
+        /// instead of one line per field.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Lock the store.
     Lock,
 

@@ -92,30 +92,18 @@ impl FieldData {
     }
 }
 
+/// This TOML file's on-disk string form for a [`FieldKind`] — delegates to
+/// `FieldKind`'s own `Display`/`FromStr` (`secrets_core::model`), the same
+/// canonical scheme `FieldDisplay`'s wire representation uses, so there is
+/// one string form for this enum, not two that could drift.
 fn kind_to_str(kind: &FieldKind) -> String {
-    match kind {
-        FieldKind::Username => "username".to_string(),
-        FieldKind::Password => "password".to_string(),
-        FieldKind::Totp => "totp".to_string(),
-        FieldKind::SshKey => "ssh-key".to_string(),
-        FieldKind::Certificate => "certificate".to_string(),
-        FieldKind::PrivateKey => "private-key".to_string(),
-        FieldKind::Note => "note".to_string(),
-        FieldKind::Custom(name) => format!("custom:{name}"),
-    }
+    kind.to_string()
 }
 
 fn kind_from_str(raw: &str) -> FieldKind {
-    match raw {
-        "username" => FieldKind::Username,
-        "password" => FieldKind::Password,
-        "totp" => FieldKind::Totp,
-        "ssh-key" => FieldKind::SshKey,
-        "certificate" => FieldKind::Certificate,
-        "private-key" => FieldKind::PrivateKey,
-        "note" => FieldKind::Note,
-        other => FieldKind::Custom(other.strip_prefix("custom:").unwrap_or(other).to_string()),
-    }
+    // Infallible: `FieldKind::from_str` never fails, it falls back to
+    // `Custom` for anything it doesn't recognize.
+    raw.parse().expect("FieldKind::from_str is infallible")
 }
 
 /// The item-path-to-storage-key join used throughout this module. A plain

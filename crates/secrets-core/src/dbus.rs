@@ -33,6 +33,39 @@ pub const STATUS_LOCKED: &str = "locked";
 /// [`ManagerProxyBlocking::status`].
 pub const STATUS_UNLOCKED: &str = "unlocked";
 
+/// The fixed string `secretsd` substitutes for a secret-shaped field's
+/// value in [`ManagerProxyBlocking::show_item`]'s response
+/// (`FieldKind::is_secret`, ADR-016).
+///
+/// Never derived from the real value in any way — constant content and
+/// length — so it leaks nothing about it, not even how long it is. A
+/// client receiving this exact string knows only "this field's kind is
+/// secret-shaped"; it is not a hint about the value underneath.
+pub const OBFUSCATED_FIELD_PLACEHOLDER: &str = "••••••••";
+
+/// One field of an item, as [`ManagerProxyBlocking::show_item`] reports
+/// it.
+///
+/// Always safe to display verbatim: a secret-shaped field's `value` is
+/// already [`OBFUSCATED_FIELD_PLACEHOLDER`] by the time this crosses the
+/// bus, substituted server-side — `secretsd` never even asks the backend
+/// for that field's real value (see `secretsd::state::DaemonState::show_item`).
+/// A struct, not a bare tuple, so both ends of the wire name each part.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, zbus::zvariant::Type,
+)]
+pub struct FieldDisplay {
+    /// The field's name, as it appears as the last segment of a
+    /// `secret://` URI.
+    pub name: String,
+    /// The field's kind, in [`crate::model::FieldKind`]'s canonical
+    /// string form (its `Display` impl).
+    pub kind: String,
+    /// The field's real value if its kind is not secret-shaped, or
+    /// [`OBFUSCATED_FIELD_PLACEHOLDER`] otherwise.
+    pub value: String,
+}
+
 /// The `org.secrets.*` extension namespace's `Manager` interface:
 /// `secret://`-shaped operations the standard Secret Service interfaces
 /// cannot express, layered on top of them — not a replacement API.
@@ -89,6 +122,18 @@ pub trait Manager {
     /// crosses the bus here and nowhere else. Requires the store to be
     /// unlocked.
     fn get(&self, uri: &str) -> zbus::Result<String>;
+
+    /// Show every field of one item: name, kind, and either the real
+    /// value (kinds `Username`/`Certificate`) or
+    /// [`OBFUSCATED_FIELD_PLACEHOLDER`] (every other kind) — see
+    /// [`crate::model::FieldKind::is_secret`], ADR-016.
+    ///
+    /// `item_uri` is a `secret://<vault>/<item...>` reference with **no**
+    /// field segment (see [`crate::uri::ItemUri`]) — distinct from every
+    /// other method on this interface, which take a full
+    /// `secret://<vault>/<item>/<field>` reference. Requires the store to
+    /// be unlocked. Fails with `ItemNotFound` if no such item exists.
+    fn show_item(&self, item_uri: &str) -> zbus::Result<Vec<FieldDisplay>>;
 }
 
 /// The `org.secrets.Error.*` D-Bus error names.
@@ -113,6 +158,10 @@ pub enum ManagerError {
 
     /// The vault, item or field does not exist.
     NotFound(String),
+
+    /// The vault exists but no item at this path does — distinct from
+    /// `NotFound`, which always names a specific field.
+    ItemNotFound(String),
 
     /// The caller is not allowed to read this secret.
     PermissionDenied(String),
@@ -139,6 +188,7 @@ impl From<CoreError> for ManagerError {
             CoreError::InvalidUri(_) => Self::InvalidUri(message),
             CoreError::VaultLocked { .. } => Self::VaultLocked(message),
             CoreError::NotFound { .. } => Self::NotFound(message),
+            CoreError::ItemNotFound { .. } => Self::ItemNotFound(message),
             CoreError::PermissionDenied { .. } => Self::PermissionDenied(message),
             CoreError::InvalidOperation(_) => Self::InvalidOperation(message),
             CoreError::BackendUnavailable(_) => Self::BackendUnavailable(message),
@@ -165,6 +215,21 @@ mod tests {
         };
         let mapped: ManagerError = error.into();
         assert!(matches!(mapped, ManagerError::NotFound(msg) if msg.contains("Personal")));
+    }
+
+    #[test]
+    fn an_item_not_found_error_maps_to_its_own_dbus_error_not_not_found() {
+        // Regression guard: an item-level lookup (`Manager::show_item`)
+        // must stay distinguishable from a field-level `NotFound` — a
+        // client that only knows to match `NotFound` would otherwise
+        // treat "no such item" the same as "no such field on an item
+        // that does exist".
+        let error = CoreError::ItemNotFound {
+            vault: "Personal".to_string(),
+            item: "GitHub".to_string(),
+        };
+        let mapped: ManagerError = error.into();
+        assert!(matches!(mapped, ManagerError::ItemNotFound(msg) if msg.contains("Personal")));
     }
 
     #[test]

@@ -7,9 +7,10 @@
 
 use std::sync::Arc;
 
+use secrets_core::dbus::{FieldDisplay, OBFUSCATED_FIELD_PLACEHOLDER};
 use secrets_core::{
-    Backend, BackendSession, BackendStatus, CoreError, Item, ItemPath, Resolver, SecretUri,
-    SecretValue, Vault,
+    Backend, BackendSession, BackendStatus, CoreError, Item, ItemPath, ItemUri, Resolver,
+    SecretUri, SecretValue, Vault,
 };
 
 use crate::backend::local::LocalBackend;
@@ -252,6 +253,62 @@ impl DaemonState {
         }
         self.check_backend_session()?;
         Resolver::new(self.backend.as_ref()).resolve(uri)
+    }
+
+    /// Show every field of one item, with secret-shaped fields' values
+    /// replaced by [`OBFUSCATED_FIELD_PLACEHOLDER`] — that substitution
+    /// happens here, before this ever calls [`DaemonState::read_field`],
+    /// so a secret-shaped field's real value is never fetched from the
+    /// backend at all, not merely masked after the fact. See ADR-016.
+    ///
+    /// The lock/session check happens up front, even though
+    /// [`DaemonState::list_items`] itself doesn't need it: an item made
+    /// entirely of secret-shaped fields would otherwise never call
+    /// [`DaemonState::read_field`] (and so never hit *its* gate),
+    /// letting a locked store answer with placeholders alone — this
+    /// command must fail the same way [`DaemonState::get`] does when
+    /// locked, regardless of which fields the item happens to have.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::VaultLocked`] if the store is locked,
+    /// [`CoreError::ItemNotFound`] if no item exists at this path, or
+    /// propagates the backend's error otherwise.
+    pub fn show_item(&self, uri: &ItemUri) -> std::result::Result<Vec<FieldDisplay>, CoreError> {
+        if !self.is_unlocked() {
+            return Err(CoreError::VaultLocked {
+                vault: uri.vault().to_string(),
+            });
+        }
+        self.check_backend_session()?;
+        let items = self.list_items(uri.vault())?;
+        let item = items
+            .into_iter()
+            .find(|item| item.path.segments() == uri.item().segments())
+            .ok_or_else(|| CoreError::ItemNotFound {
+                vault: uri.vault().to_string(),
+                item: uri.item().to_string(),
+            })?;
+        item.fields
+            .into_iter()
+            .map(|field| {
+                let value = if field.kind.is_secret() {
+                    // Never asks the backend for this field at all — the
+                    // placeholder is not a display-time mask over a real
+                    // value that was fetched anyway.
+                    OBFUSCATED_FIELD_PLACEHOLDER.to_string()
+                } else {
+                    self.read_field(uri.vault(), &item.path, &field.name)?
+                        .expose_secret()
+                        .to_string()
+                };
+                Ok(FieldDisplay {
+                    name: field.name,
+                    kind: field.kind.to_string(),
+                    value,
+                })
+            })
+            .collect()
     }
 
     /// Access the underlying backend directly — used to enumerate vaults/
@@ -504,6 +561,46 @@ mod tests {
         let (_dir, authenticated) = state_with_backend_session(BackendStatus::Authenticated);
         authenticated.unlock("test passphrase").unwrap();
         assert!(authenticated.is_accessible());
+    }
+
+    #[test]
+    fn show_item_obfuscates_secret_fields_and_reveals_safe_ones() {
+        let (_dir, state) = state_over_fresh_vault();
+        state.unlock("test passphrase").unwrap();
+
+        let uri = ItemUri::parse("secret://Personal/GitHub").unwrap();
+        let fields = state.show_item(&uri).unwrap();
+
+        let by_name = |name: &str| fields.iter().find(|f| f.name == name).unwrap();
+        assert_eq!(by_name("username").value, "octocat");
+        assert_eq!(by_name("password").value, OBFUSCATED_FIELD_PLACEHOLDER);
+        assert_eq!(by_name("totp").value, OBFUSCATED_FIELD_PLACEHOLDER);
+
+        // The actual invariant this feature exists for: not just equal to
+        // the placeholder, but the real secret values never appear
+        // anywhere in the response at all.
+        for field in &fields {
+            assert_ne!(field.value, "correct horse battery staple");
+            assert_ne!(field.value, "JBSWY3DPEHPK3PXP");
+        }
+    }
+
+    #[test]
+    fn show_item_requires_unlock() {
+        let (_dir, state) = state_over_fresh_vault();
+        let uri = ItemUri::parse("secret://Personal/GitHub").unwrap();
+        let error = state.show_item(&uri).unwrap_err();
+        assert!(matches!(error, CoreError::VaultLocked { .. }));
+    }
+
+    #[test]
+    fn show_item_reports_item_not_found_for_an_unknown_item() {
+        let (_dir, state) = state_over_fresh_vault();
+        state.unlock("test passphrase").unwrap();
+
+        let uri = ItemUri::parse("secret://Personal/does-not-exist").unwrap();
+        let error = state.show_item(&uri).unwrap_err();
+        assert!(matches!(error, CoreError::ItemNotFound { .. }));
     }
 
     #[test]
