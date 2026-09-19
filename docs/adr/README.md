@@ -59,3 +59,6 @@ by editing the old one. The history is the value.
 - [ADR-018](018-multi-store-support.md) — Multi-store support (supersedes
   ADR-009's/ADR-013's single-store framing in part; extends ADR-002/
   ADR-008/ADR-011)
+- [ADR-019](019-pass-backend.md) — The `pass`/`gopass` backend (revises
+  ADR-011's "likely no `BackendSession`" prediction's reasoning, without
+  changing its conclusion)

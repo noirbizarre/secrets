@@ -83,7 +83,10 @@ impl Config {
             if let Some(message) = legacy_backend_table(contents) {
                 return DaemonError::LegacyBackendConfig(message);
             }
-            match missing_1password_account_name(contents) {
+            if let Some(message) = missing_1password_account_name(contents) {
+                return DaemonError::InvalidBackendConfig(message);
+            }
+            match missing_pass_secret_key_path(contents) {
                 Some(message) => DaemonError::InvalidBackendConfig(message),
                 None => DaemonError::ConfigUnreadable {
                     path: path.to_path_buf(),
@@ -136,6 +139,31 @@ fn missing_1password_account_name(contents: &str) -> Option<String> {
     None
 }
 
+/// If `contents` has a `[store.<id>] type = "pass"` table missing
+/// `secret_key_path`, returns a specific, actionable diagnostic naming
+/// that store — otherwise `None`, so the caller falls back to the raw
+/// TOML parse error. Only called once the strict [`Config`] parse has
+/// already failed, so this never masks a config that actually parses
+/// fine. Mirrors [`missing_1password_account_name`] exactly.
+fn missing_pass_secret_key_path(contents: &str) -> Option<String> {
+    let raw: toml::Value = toml::from_str(contents).ok()?;
+    let stores = raw.get("store")?.as_table()?;
+    for (id, store) in stores {
+        if store.get("type")?.as_str()? != "pass" {
+            continue;
+        }
+        if store.get("secret_key_path").is_some() {
+            continue;
+        }
+        return Some(format!(
+            "[store.{id}] type = \"pass\" requires a `secret_key_path` field — \
+             the path to an ascii-armored OpenPGP secret key exported via \
+             `gpg --export-secret-keys --armor <key-id> > key.asc`"
+        ));
+    }
+    None
+}
+
 /// The config file's path, if `XDG_CONFIG_HOME` (or its fallback) could be
 /// determined at all.
 fn config_path() -> Option<PathBuf> {
@@ -163,6 +191,28 @@ pub enum BackendKind {
         /// an implementation choice (see `protocol::init_client_request`'s
         /// own doc comment).
         account_name: String,
+    },
+    /// A `pass`/`gopass`-compatible store directory, decrypted via rPGP
+    /// — see [ADR-019](../../../../docs/adr/019-pass-backend.md). A
+    /// `gopass` "mount" is just another `[store.<id>]` table of this
+    /// same type, pointed at that mount's own directory.
+    #[serde(rename = "pass")]
+    Pass {
+        /// The store's root directory. Defaults to `~/.password-store`
+        /// (`pass`'s own default) when omitted.
+        #[serde(default)]
+        store_dir: Option<PathBuf>,
+        /// An ascii-armored OpenPGP secret key, exported via
+        /// `gpg --export-secret-keys --armor <key-id> > key.asc`.
+        /// Required: `secretsd` never reads GnuPG's own keyring
+        /// directly (ADR-019) — rPGP has nothing to parse in
+        /// `private-keys-v1.d`'s own S-expression format.
+        secret_key_path: PathBuf,
+        /// This store's one vault name (`pass` has no native
+        /// multi-vault concept). Defaults to `store_dir`'s own basename
+        /// with a single leading `.` stripped.
+        #[serde(default)]
+        vault: Option<String>,
     },
 }
 
@@ -224,6 +274,59 @@ mod tests {
                 account_name: "Work".to_string()
             })
         );
+    }
+
+    #[test]
+    fn a_pass_store_table_parses_into_its_named_entry() {
+        let config: Config = toml::from_str(
+            "[store.default]\ntype = \"pass\"\nsecret_key_path = \"/tmp/key.asc\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config.stores.get(&StoreId::new("default").unwrap()),
+            Some(&BackendKind::Pass {
+                store_dir: None,
+                secret_key_path: PathBuf::from("/tmp/key.asc"),
+                vault: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_pass_store_accepts_an_explicit_store_dir_and_vault_name() {
+        let config: Config = toml::from_str(
+            "[store.work]\ntype = \"pass\"\nsecret_key_path = \"/tmp/key.asc\"\n\
+             store_dir = \"/tmp/work-store\"\nvault = \"Work\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config.stores.get(&StoreId::new("work").unwrap()),
+            Some(&BackendKind::Pass {
+                store_dir: Some(PathBuf::from("/tmp/work-store")),
+                secret_key_path: PathBuf::from("/tmp/key.asc"),
+                vault: Some("Work".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn a_pass_store_missing_a_secret_key_path_is_rejected() {
+        let result: std::result::Result<Config, _> =
+            toml::from_str("[store.default]\ntype = \"pass\"\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_pass_store_missing_a_secret_key_path_names_the_specific_store_id() {
+        let error = Config::parse(
+            "[store.personal]\ntype = \"local\"\n\n[store.work]\ntype = \"pass\"\n",
+            std::path::Path::new("test.toml"),
+        )
+        .unwrap_err();
+        match error {
+            DaemonError::InvalidBackendConfig(message) => assert!(message.contains("store.work")),
+            other => panic!("expected InvalidBackendConfig, got {other:?}"),
+        }
     }
 
     #[test]

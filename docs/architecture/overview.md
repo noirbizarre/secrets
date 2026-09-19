@@ -36,7 +36,8 @@ flowchart TB
 
     local[(Local encrypted file)]
     onepassword[(1Password Desktop<br/>native IPC)]
-    future[(Vaultwarden / Bitwarden /<br/>pass / gopass / passage)]
+    pass[(pass / gopass<br/>rPGP)]
+    future[(Vaultwarden / Bitwarden /<br/>passage)]
 
     cli --> client
     gtk -. secrets-client or D-Bus .-> client
@@ -54,6 +55,7 @@ flowchart TB
     resolver --> backend
     backend --> local
     backend --> onepassword
+    backend --> pass
     backend -. not yet .-> future
     broker <-. org.secrets.PromptProvider1 .-> provider
 ```
@@ -76,20 +78,24 @@ flowchart TB
    optional trait, `BackendSession`, lets a backend report its own
    authentication/session state, distinct from `DaemonState`'s per-store
    lock — see [ADR-011](../adr/011-backend-session-and-authentication-state.md).
-   Two implementations exist: the local encrypted file, and 1Password
+   Three implementations exist: the local encrypted file, 1Password
    Desktop's native IPC channel (not the `op` CLI) — see
    [ADR-012](../adr/012-1password-desktop-backend.md),
    [1password-integration.md](1password-integration.md) and
    [1password-poc-results.md](1password-poc-results.md) for the
-   investigation and validation behind it. Either can be configured more
-   than once, as separate named *stores* (ADR-018) — a store is one
+   investigation and validation behind it — and a `pass`/`gopass`-
+   compatible store directory, decrypted via a pure-Rust OpenPGP
+   implementation rather than shelling out (see
+   [ADR-019](../adr/019-pass-backend.md)). Any of them can be configured
+   more than once, as separate named *stores* (ADR-018) — a store is one
    configured backend instance, which may itself expose several named
    vaults.
 4. **`secretsd`** — the daemon. Owns `DaemonState`, a registry of every
    configured store, each with its own session/lock (ADR-009, extended by
    [ADR-018](../adr/018-multi-store-support.md) to per-store); a keyed
    collection of backend instances (`[store.<id>] type = "local" |
-   "1password"` — see [config.rs](../../crates/secretsd/src/config.rs));
+   "1password" | "pass"` — see
+   [config.rs](../../crates/secretsd/src/config.rs));
    and three protocol surfaces: the standard Secret Service interfaces
    ([ADR-004](../adr/004-secret-service-compatibility-scope.md)), the
    `org.secrets.*` extension namespace

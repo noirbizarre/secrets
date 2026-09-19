@@ -11,6 +11,9 @@ extend-exclude = [
   # Pre-existing branding asset, not project prose — typos flags its own
   # filename.
   "logo.inpiration.png",
+  # An ascii-armored OpenPGP secret key (base64) — a test fixture, not
+  # prose; its content is never natural-language text for typos to check.
+  "crates/secretsd/src/backend/pass/testdata/gopass-fixture/key.asc",
 ]
 
 [default.extend-words]

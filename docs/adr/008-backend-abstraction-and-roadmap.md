@@ -5,7 +5,9 @@
 Accepted. The "cannot run two backends at once" limitation named in this
 ADR's own Consequences is lifted by
 [ADR-018](018-multi-store-support.md); the trait design and roadmap
-described here are otherwise unchanged.
+described here are otherwise unchanged. The filesystem-based `pass`/
+`gopass` roadmap item is implemented by
+[ADR-019](019-pass-backend.md); `passage` remains future work.
 
 ## Context
 

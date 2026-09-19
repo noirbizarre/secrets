@@ -50,7 +50,14 @@ fn map_lock_error(error: DaemonError) -> ManagerError {
     match error {
         // A wrong passphrase is the caller's fault, not the backend's —
         // distinct D-Bus error name so a client does not retry blindly.
-        DaemonError::IncorrectPassphrase => ManagerError::PermissionDenied(error.to_string()),
+        // Same wire error as `LocalBackend`'s own wrong-passphrase case
+        // (`IncorrectPassphrase`) — the two variants exist to keep each
+        // backend's own *message* accurate, not to carry distinct D-Bus
+        // semantics: from a caller's perspective, both are "your
+        // passphrase was rejected."
+        DaemonError::IncorrectPassphrase | DaemonError::IncorrectKeyPassphrase => {
+            ManagerError::PermissionDenied(error.to_string())
+        }
         DaemonError::StoreNotFound(_) => ManagerError::StoreNotFound(error.to_string()),
         DaemonError::StoreSelectionRequired(_) => {
             ManagerError::StoreSelectionRequired(error.to_string())

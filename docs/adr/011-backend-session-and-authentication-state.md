@@ -5,7 +5,11 @@
 Accepted. Extended by [ADR-018](018-multi-store-support.md):
 `DaemonState` now holds one `BackendSession` per store rather than one for
 "the" backend; the `BackendStatus`/`BackendSession` contract itself is
-unchanged.
+unchanged. This ADR's own prediction that `pass`/`gopass`/`passage`
+"likely" need no `BackendSession` is confirmed by
+[ADR-019](019-pass-backend.md) — but for a different reason than assumed
+here (a real `LockController` instead, since decryption turned out to be
+in-process, not mediated by an already-running external agent).
 
 ## Context
 
