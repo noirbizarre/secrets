@@ -82,6 +82,22 @@ Every error variant is listed in `secrets_core::uri::UriError`, and is
 safe to log or display: a malformed reference cannot itself be a secret's
 *value*, only its name.
 
+## Item-level references
+
+`secrets_core::uri::ItemUri` parses `secret://<vault>/<item...>` — the
+same grammar with **no field segment** — for the one operation that
+addresses a whole item rather than one of its fields:
+`Manager.ShowItem`/`secrets show` (see
+[ADR-016](adr/016-show-command-and-field-value-obfuscation.md)). It has
+no way to tell "a two-segment item path" apart from "a one-segment item
+plus a field" for the same string — `secret://Personal/GitHub/password`
+is item `GitHub` field `password` to `SecretUri`, but item
+`["GitHub", "password"]` to `ItemUri` — so a caller must already know
+which shape it means, the same way it must already know whether a bare
+`foo/bar` is a nested item path or an item plus a field. Every other
+operation on this page's grammar (`Resolve`, `Get`, and `secrets`'
+`resolve`/`get`/`totp` commands) still uses `SecretUri`, unchanged.
+
 ## Implementation
 
 Parsing, validation and canonical formatting all live in

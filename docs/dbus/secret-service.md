@@ -58,8 +58,17 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
   `item` or `field` attribute (see `Item.Attributes` below).
 - `Item.GetSecret`, `Service.GetSecrets` — read a field's value, subject to
   lock state.
-- `Item.Locked`, `Collection.Locked` — reflect the daemon-wide lock state
-  live, on every property read.
+- `Item.Locked`, `Collection.Locked` — reflect **both** the daemon-wide
+  lock state and the active backend's own session state (see
+  [ADR-011](../adr/011-backend-session-and-authentication-state.md)),
+  live, on every property read. For a backend with no session concept of
+  its own (the local backend), only the daemon lock matters, same as
+  before. For 1Password Desktop, whose "unlock" *is* its own session (see
+  [`docs/backends/1password.md`](../backends/1password.md)), an object
+  reports locked whenever that session needs (re)authentication or is
+  unavailable — even though the daemon-wide lock itself is always
+  "unlocked" for that backend. `Service.SearchItems`/`GetSecrets` and the
+  SSH agent follow the same rule.
 - `Item.Attributes` — a synthetic `{"vault": ..., "item": ..., "field":
   ...}` map (there is no Secret-Service-native concept of a
   vault/item/field triple to draw richer attributes from).
@@ -67,6 +76,19 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
   any; the same collection is also reachable directly at the literal
   `/org/freedesktop/secrets/aliases/default` object path (see the
   interfaces table above).
+- **Live topology** (see
+  [ADR-015](../adr/015-live-secret-service-topology.md)). The registered
+  `Collection`/`Item` object set is not fixed at startup: a background
+  scan runs immediately after `secretsd` starts, then every 30 seconds,
+  plus immediately whenever `org.secrets.Manager`'s `Unlock`/`Lock` is
+  called — so a vault or item appearing later (a new 1Password item, or
+  the local backend's vault file being created for the first time) becomes
+  visible **without restarting `secretsd`**. Already-connected clients are
+  notified via the standard `Service.CollectionCreated`/`CollectionDeleted`
+  and `Collection.ItemCreated`/`ItemDeleted` signals, not just new
+  connections that re-enumerate. `Service.CollectionChanged`/
+  `Collection.ItemChanged` are not implemented — nothing today diffs a
+  field's metadata distinctly from it being added or removed.
 
 ## What does not work (by design, in this MVP)
 
@@ -85,12 +107,6 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
   [`docs/architecture/external-clients.md`](../architecture/external-clients.md)).
   `Service.Unlock` therefore only reflects state `secrets unlock` already
   set; it cannot itself trigger a passphrase prompt.
-- **Dynamic topology.** Collections and items are registered once, at
-  `secretsd` startup, from whatever the backend reports at that moment.
-  Creating the vault file for the first time (via `secrets unlock`) while
-  `secretsd` is already running does not retroactively add its
-  collections — restart the daemon. `org.secrets.Manager` has no such
-  limitation.
 
 ## Errors
 

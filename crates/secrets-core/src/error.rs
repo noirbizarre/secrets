@@ -39,6 +39,20 @@ pub enum CoreError {
         field: String,
     },
 
+    /// The vault exists but no item at this path does.
+    ///
+    /// Distinct from [`CoreError::NotFound`], which always names a
+    /// specific field: an item-level lookup (`secrets show`,
+    /// `Manager::show_item`) has no field to name, so it needs its own
+    /// variant rather than a `NotFound` with an empty/placeholder field.
+    #[error("item not found: secret://{vault}/{item}")]
+    ItemNotFound {
+        /// The vault that was searched.
+        vault: String,
+        /// The item path that was searched, already joined for display.
+        item: String,
+    },
+
     /// The caller is not allowed to read this secret.
     ///
     /// Reserved for a future access-control layer; the MVP backend never

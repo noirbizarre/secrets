@@ -45,3 +45,7 @@ by editing the old one. The history is the value.
   extensions
 - [ADR-014](014-cli-secret-disclosure-modes.md) — `secrets get`'s output
   modes and terminal disclosure refusal
+- [ADR-015](015-live-secret-service-topology.md) — Live Secret Service
+  topology (supersedes ADR-004's "fixed at startup" framing)
+- [ADR-016](016-show-command-and-field-value-obfuscation.md) — `secrets
+  show` and field-value obfuscation by kind

@@ -36,12 +36,14 @@ struct SecretsAgent {
 impl SecretsAgent {
     /// Every `SshKey` field across every vault, parsed as a private key.
     ///
-    /// Returns an empty list while locked: identities are unavailable when
-    /// the store is locked, by construction — this is the *only* place
-    /// that decides that, so `request_identities` and `sign` cannot
-    /// disagree about it.
+    /// Returns an empty list while inaccessible: identities are
+    /// unavailable when the store is locked *or* the active backend's own
+    /// session needs (re)authentication (see
+    /// [`DaemonState::is_accessible`]) — this is the *only* place that
+    /// decides that, so `request_identities` and `sign` cannot disagree
+    /// about it.
     fn private_keys(&self) -> Vec<PrivateKey> {
-        if !self.state.is_unlocked() {
+        if !self.state.is_accessible() {
             return Vec::new();
         }
         let Ok(vaults) = self.state.list_vaults() else {
@@ -57,15 +59,28 @@ impl SecretsAgent {
                     if field.kind != FieldKind::SshKey {
                         continue;
                     }
-                    let Ok(value) =
-                        self.state
-                            .backend()
-                            .get_field(&vault.name, &item.path, &field.name)
+                    let Ok(value) = self.state.read_field(&vault.name, &item.path, &field.name)
                     else {
                         continue;
                     };
-                    if let Ok(key) = PrivateKey::from_openssh(value.expose_secret()) {
-                        keys.push(key);
+                    match PrivateKey::from_openssh(value.expose_secret()) {
+                        Ok(key) => keys.push(key),
+                        Err(error) => {
+                            // Never logs `value` itself — only which field
+                            // failed and why parsing it failed. A backend
+                            // reporting `FieldKind::SshKey` whose value
+                            // isn't actually OpenSSH-formatted text (see
+                            // `docs/backends/1password.md`'s note on this)
+                            // would otherwise vanish from the agent with
+                            // no trace at all.
+                            tracing::warn!(
+                                vault = %vault.name,
+                                item = %item.path,
+                                field = %field.name,
+                                %error,
+                                "an SshKey field's value could not be parsed as an OpenSSH private key; skipping it",
+                            );
+                        }
                     }
                 }
             }
@@ -157,4 +172,48 @@ pub fn spawn(state: Arc<DaemonState>, socket_path: PathBuf) -> std::thread::Join
             }
         });
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use secrets_core::BackendStatus;
+
+    use super::*;
+    use crate::test_support::{state_over_fresh_vault, state_with_backend_session};
+
+    #[test]
+    fn private_keys_is_empty_while_locked() {
+        let (_dir, state) = state_over_fresh_vault();
+        let agent = SecretsAgent {
+            state: Arc::new(state),
+        };
+        assert!(agent.private_keys().is_empty());
+    }
+
+    #[test]
+    fn private_keys_is_empty_when_the_backend_session_requires_authentication() {
+        // Regression guard for #7: an `AlwaysUnlocked` backend (like
+        // 1Password) must not surface identities while its own session is
+        // unmet, even though the daemon-wide lock alone would allow it.
+        let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
+        state.unlock("test passphrase").unwrap();
+        let agent = SecretsAgent {
+            state: Arc::new(state),
+        };
+        assert!(agent.private_keys().is_empty());
+    }
+
+    #[test]
+    fn private_keys_reports_the_demo_vaults_ssh_key_once_accessible() {
+        // Confirms the accessible path runs to completion
+        // (list_vaults/list_items/read_field/from_openssh) end to end
+        // against the demo vault's seeded `Infrastructure/Production/
+        // ssh-key` field.
+        let (_dir, state) = state_over_fresh_vault();
+        state.unlock("test passphrase").unwrap();
+        let agent = SecretsAgent {
+            state: Arc::new(state),
+        };
+        assert_eq!(agent.private_keys().len(), 1);
+    }
 }

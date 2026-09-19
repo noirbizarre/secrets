@@ -36,10 +36,14 @@ impl ItemIface {
 
 #[zbus::interface(name = "org.freedesktop.Secret.Item")]
 impl ItemIface {
-    /// Whether the daemon is currently locked.
+    /// Whether this item is currently readable — reflects both the
+    /// daemon-wide lock and the active backend's own session state (see
+    /// [`crate::state::DaemonState::is_accessible`]), so a 1Password
+    /// session that needs (re)authentication shows as locked here too, not
+    /// just through `org.secrets.Manager`.
     #[zbus(property)]
     fn locked(&self) -> bool {
-        !self.state.is_unlocked()
+        !self.state.is_accessible()
     }
 
     /// `vault`, `item` and `field`, so `Service`/`Collection.SearchItems`
@@ -64,17 +68,12 @@ impl ItemIface {
     ///
     /// # Errors
     ///
-    /// Fails while locked, or if the value cannot be decrypted.
+    /// Fails while locked, while the active backend's own session needs
+    /// (re)authentication, or if the value cannot be decrypted.
     fn get_secret(&self, session: zbus::zvariant::OwnedObjectPath) -> zbus::fdo::Result<Secret> {
-        if !self.state.is_unlocked() {
-            return Err(zbus::fdo::Error::Failed(
-                "the store is locked; run `secrets unlock` first".to_string(),
-            ));
-        }
         let value = self
             .state
-            .backend()
-            .get_field(&self.vault, &self.item, &self.field)
+            .read_field(&self.vault, &self.item, &self.field)
             .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
         Ok(Secret {
             session,
@@ -97,5 +96,74 @@ impl ItemIface {
         Err(zbus::fdo::Error::NotSupported(
             "deleting items is not supported in this MVP".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use secrets_core::BackendStatus;
+
+    use super::*;
+    use crate::test_support::{state_over_fresh_vault, state_with_backend_session};
+
+    fn item_over(state: DaemonState) -> ItemIface {
+        ItemIface::new(
+            Arc::new(state),
+            "Personal".to_string(),
+            ItemPath::new(vec!["GitHub".to_string()]).unwrap(),
+            "password".to_string(),
+        )
+    }
+
+    #[test]
+    fn locked_reflects_the_daemon_lock_alone_when_the_backend_has_no_session() {
+        let (_dir, state) = state_over_fresh_vault();
+        let item = item_over(state);
+        assert!(item.locked());
+    }
+
+    #[test]
+    fn locked_is_false_once_unlocked_with_no_backend_session() {
+        let (_dir, state) = state_over_fresh_vault();
+        state.unlock("test passphrase").unwrap();
+        let item = item_over(state);
+        assert!(!item.locked());
+    }
+
+    #[test]
+    fn locked_reports_true_when_the_backend_session_requires_authentication_even_if_unlocked() {
+        // Regression guard for #7: an `AlwaysUnlocked` backend (like
+        // 1Password) must not make `Item.Locked` report `false` while its
+        // own session is unmet.
+        let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
+        state.unlock("test passphrase").unwrap();
+        let item = item_over(state);
+        assert!(item.locked());
+    }
+
+    #[test]
+    fn get_secret_fails_when_the_backend_session_requires_authentication() {
+        let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
+        state.unlock("test passphrase").unwrap();
+        let item = item_over(state);
+        let session: zbus::zvariant::OwnedObjectPath =
+            super::super::SESSION_PATH.try_into().unwrap();
+        assert!(item.get_secret(session).is_err());
+    }
+
+    #[test]
+    fn get_secret_succeeds_when_accessible() {
+        let (_dir, state) = state_over_fresh_vault();
+        state.unlock("test passphrase").unwrap();
+        let item = item_over(state);
+        let session: zbus::zvariant::OwnedObjectPath =
+            super::super::SESSION_PATH.try_into().unwrap();
+        let secret = item.get_secret(session).unwrap();
+        assert_eq!(
+            String::from_utf8(secret.value).unwrap(),
+            "correct horse battery staple"
+        );
     }
 }

@@ -8,7 +8,7 @@
 //! itself.
 
 use secrets_core::SecretValue;
-use secrets_core::dbus::ManagerProxyBlocking;
+use secrets_core::dbus::{FieldDisplay, ManagerProxyBlocking};
 
 use crate::{Error, Result};
 
@@ -81,5 +81,15 @@ impl SecretsClient<'_> {
     /// of a secret without going out of their way to `expose_secret()` it.
     pub fn get(&self, uri: &str) -> Result<SecretValue> {
         map(self.proxy.get(uri)).map(SecretValue::new)
+    }
+
+    /// Show every field of one item — name, kind, and either the real
+    /// value or a fixed obfuscated placeholder, depending on the field's
+    /// kind. See [`secrets_core::dbus::Manager::show_item`].
+    ///
+    /// `item_uri` is a `secret://<vault>/<item...>` reference with no
+    /// field segment.
+    pub fn show_item(&self, item_uri: &str) -> Result<Vec<FieldDisplay>> {
+        map(self.proxy.show_item(item_uri))
     }
 }

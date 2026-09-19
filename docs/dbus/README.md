@@ -47,11 +47,16 @@ working unmodified, not for `secrets` itself to use.
 | `secrets list`                   | `org.secrets.Manager`  | `ListVaults` / `ListItems`     |
 | `secrets resolve`                | `org.secrets.Manager`  | `Resolve`                      |
 | `secrets get`                    | `org.secrets.Manager`  | `Get`                          |
+| `secrets show`                   | `org.secrets.Manager`  | `ShowItem`                     |
 
 See [ADR-014](../adr/014-cli-secret-disclosure-modes.md) for what `secrets
 get` does with the value once it has it (default/`--raw`/`--json`/
 `--clipboard`) — a CLI-side decision, not a protocol one; the wire method
-called is `Get` in every case.
+called is `Get` in every case. See
+[ADR-016](../adr/016-show-command-and-field-value-obfuscation.md) for
+`secrets show`'s different disclosure model: `ShowItem` never sends a
+secret-shaped field's real value over the wire at all, so there is
+nothing for the CLI to redact on that command's behalf.
 
 ## Source of truth and bindings
 

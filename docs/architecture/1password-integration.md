@@ -349,6 +349,22 @@ other apps"** (or "Integrate with the 1Password SDKs") is enabled in the
 Desktop app — a real, user-facing gate, not something request bytes can
 route around.
 
+### `ItemsGetAll`'s 50-item batch limit
+
+Confirmed, not just suspected: 1Password Desktop's `ItemsGetAll` operation
+rejects a request whose `item_ids` list has more than 50 entries, with
+`invalid user input: encountered the following errors: you can only
+retrieve up to 50 items at once`. Not documented anywhere in 1Password's
+own SDK docs or discoverable from the disassembly passes above — found
+only by running `list_items` against a real account whose vault held more
+than 50 items. `OnePasswordBackend::list_items`
+(`crates/secretsd/src/backend/onepassword/backend.rs`) chunks around this
+transparently (`ITEMS_GET_ALL_BATCH_LIMIT`), issuing one `ItemsGetAll` call
+per 50 IDs and concatenating their responses — the rest of this backend,
+and every other `Backend` implementation, never sees this constraint. Like
+every other empirically-discovered constraint in this document, treat this
+number as an adapter detail to re-verify, not a published, versioned limit.
+
 ### `crates/secretsd/src/backend/onepassword/protocol.rs`
 
 Implements the envelope/payload construction and response parsing above,

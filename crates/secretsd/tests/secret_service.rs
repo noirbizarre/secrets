@@ -105,6 +105,10 @@ fn assert_failed<T: std::fmt::Debug>(result: zbus::Result<T>) {
 fn collections_and_items_are_enumerable_and_stable_while_locked() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
 
     // Vault/item *names* are metadata, not secret material — available
     // even before the very first `Unlock` (see `LocalBackend::
@@ -156,6 +160,10 @@ fn collections_and_items_are_enumerable_and_stable_while_locked() {
 fn reading_a_secret_while_locked_fails_and_reflects_locked_everywhere() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
     let session = open_plain_session(&daemon);
 
     assert_failed(
@@ -176,6 +184,10 @@ fn reading_a_secret_while_locked_fails_and_reflects_locked_everywhere() {
 fn unlocking_reveals_secrets_and_locking_hides_them_again() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
 
     daemon
         .unlock(DEMO_PASSPHRASE)
@@ -224,6 +236,10 @@ fn unlocking_reveals_secrets_and_locking_hides_them_again() {
 fn unlocking_with_the_wrong_passphrase_is_rejected_and_the_store_stays_locked() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
 
     let error = daemon
         .unlock("definitely not the right passphrase")
@@ -241,6 +257,10 @@ fn unlocking_with_the_wrong_passphrase_is_rejected_and_the_store_stays_locked() 
 fn search_items_splits_matches_by_lock_state_and_reports_none_for_unknown_attributes() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
 
     // Locked: every match lands in the "locked" half of the tuple.
     let (unlocked, locked) = daemon
@@ -284,6 +304,10 @@ fn search_items_splits_matches_by_lock_state_and_reports_none_for_unknown_attrib
 fn get_secrets_silently_omits_object_paths_outside_the_known_topology() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
     daemon.unlock(DEMO_PASSPHRASE).unwrap();
     let session = open_plain_session(&daemon);
 
@@ -312,6 +336,10 @@ fn get_secrets_silently_omits_object_paths_outside_the_known_topology() {
 fn the_default_alias_resolves_to_the_first_vault_alphabetically() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
 
     // `LocalBackend::list_vaults` iterates a `BTreeMap`, so "Infrastructure"
     // sorts before "Personal" — asserted explicitly because a client
@@ -342,6 +370,10 @@ fn the_default_alias_resolves_to_the_first_vault_alphabetically() {
 fn every_write_operation_is_rejected_as_not_supported() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
     let service = daemon.service();
 
     assert_not_supported(service.create_collection(HashMap::new(), ""));
@@ -428,6 +460,10 @@ fn prompting_immediately_reports_itself_dismissed() {
 fn ssh_key_field_decrypts_to_a_valid_ed25519_private_key_and_never_leaks_to_logs() {
     let daemon = TestDaemon::start();
     let topology = demo_topology();
+    // The live topology (ADR-015) populates in the background, not
+    // synchronously with `start()` returning — wait for the demo vault's
+    // collections specifically before asserting anything about them.
+    daemon.wait_until_collections(&[topology.personal.clone(), topology.infrastructure.clone()]);
     daemon.unlock(DEMO_PASSPHRASE).unwrap();
     let session = open_plain_session(&daemon);
 

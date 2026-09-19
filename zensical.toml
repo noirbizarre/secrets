@@ -21,6 +21,9 @@ Copyright &copy; 2026 Axel H. — MIT licensed
 # meaningfully conflict with additions here.
 nav = [
   { "Home" = "index.md" },
+  { "Backends" = [
+    { "1Password Desktop" = "backends/1password.md" },
+  ] },
   { "Architecture" = [
     { "Overview" = "architecture/overview.md" },
     { "External clients" = "architecture/external-clients.md" },

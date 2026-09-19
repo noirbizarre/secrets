@@ -81,6 +81,29 @@ returns secret material — the plaintext crosses the bus here and nowhere
 else. Same failure modes as `Resolve`, plus whatever the backend itself
 reports (`BackendUnavailable`).
 
+### `ShowItem(item_uri: String) -> Vec<FieldDisplay>`
+
+Shows every field of one item: its name, kind, and either its real value
+(kinds `Username`/`Certificate`, per `FieldKind::is_secret`) or the fixed
+string `OBFUSCATED_FIELD_PLACEHOLDER` (`"••••••••"`, every other kind).
+See [ADR-016](../adr/016-show-command-and-field-value-obfuscation.md).
+
+`item_uri` is a `secret://<vault>/<item...>` reference with **no field
+segment** — distinct from every other method here, which take a full
+`secret://<vault>/<item>/<field>` reference. Requires the store to be
+unlocked. Fails with `InvalidUri` if `item_uri` does not parse,
+`VaultLocked` if the store is locked, `BackendRequiresAuthentication` if
+the active backend has its own unmet session requirement, or
+`ItemNotFound` if no item exists at that path.
+
+A secret-shaped field's real value is never fetched from the backend at
+all for this method — the obfuscation happens before a value is ever
+requested, not as a display-time mask over one that was. `FieldDisplay`
+is a struct of three strings (`name`, `kind`, `value`); `kind` is
+`FieldKind`'s canonical string form (`"username"`, `"password"`,
+`"totp"`, `"ssh-key"`, `"certificate"`, `"private-key"`, `"note"`, or
+`"custom:<name>"`).
+
 ## Errors
 
 `secrets_core::dbus::ManagerError` (`org.secrets.Error.*`), one variant per
@@ -92,6 +115,7 @@ parsing a message string:
 | `org.secrets.Error.InvalidUri`           | The `secret://` reference did not parse   |
 | `org.secrets.Error.VaultLocked`          | The store is locked                       |
 | `org.secrets.Error.NotFound`             | The vault, item or field does not exist   |
+| `org.secrets.Error.ItemNotFound`         | The vault exists but no item at this path does (`ShowItem` only) |
 | `org.secrets.Error.PermissionDenied`     | Not allowed (includes a wrong passphrase) |
 | `org.secrets.Error.InvalidOperation`     | The operation does not make sense here    |
 | `org.secrets.Error.BackendUnavailable`   | The backend could not be reached          |

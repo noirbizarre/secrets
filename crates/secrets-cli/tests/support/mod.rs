@@ -20,6 +20,15 @@
 //!   and located explicitly with `escargot` instead, which works
 //!   regardless of whether `secrets-cli`'s tests are run in isolation or as
 //!   part of the whole workspace.
+//!
+//! Shared by more than one test binary (`end_to_end.rs`, `onepassword_smoke.rs`,
+//! ...), each of which `mod support;`s and compiles its own copy — so
+//! `dead_code` fires per binary for whichever items only the *other* one
+//! uses (e.g. `start_with_1password` is dead from `end_to_end.rs`'s point
+//! of view). Silenced crate-wide here rather than item-by-item, since
+//! which items are "unused" depends on which binary is compiling this
+//! module, not on this module itself.
+#![allow(dead_code)]
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -122,6 +131,41 @@ impl TestDaemon {
     /// within a few seconds — always with the captured output attached.
     #[must_use]
     pub fn start() -> Self {
+        Self::start_with(None, Duration::from_secs(10))
+    }
+
+    /// Same as [`start`](Self::start), but writes a `secretsd.toml`
+    /// selecting the 1Password Desktop backend before starting the
+    /// daemon, and allows a much longer readiness timeout: the *first*
+    /// call this backend makes (during `secretsd`'s own startup discovery)
+    /// may block on a human approving 1Password's "Integrate with other
+    /// apps" IPC prompt — see `docs/backends/1password.md`.
+    ///
+    /// Used only by the opt-in, `#[ignore]`d smoke test
+    /// (`tests/onepassword_smoke.rs`) against a real, installed 1Password
+    /// Desktop — never in CI, and never with production credentials (see
+    /// `AGENTS.md`).
+    ///
+    /// # Panics
+    ///
+    /// Same as [`start`](Self::start), with a 60s readiness deadline
+    /// instead of 10s.
+    #[must_use]
+    pub fn start_with_1password(account_name: &str) -> Self {
+        let config =
+            format!("[backend]\ntype = \"1password\"\naccount_name = \"{account_name}\"\n");
+        Self::start_with(Some(config), Duration::from_secs(60))
+    }
+
+    /// The shared implementation behind [`start`](Self::start) and
+    /// [`start_with_1password`](Self::start_with_1password).
+    ///
+    /// `backend_config`, if given, is written as `secretsd.toml` before
+    /// the daemon starts, selecting a non-default backend. The demo local
+    /// vault is always seeded regardless — harmless when a different
+    /// backend is configured (that backend simply never reads it), and
+    /// keeps this one code path shared rather than duplicated per backend.
+    fn start_with(backend_config: Option<String>, readiness_timeout: Duration) -> Self {
         let data_dir = tempfile::tempdir().expect("create a temporary XDG_DATA_HOME");
         let config_dir = tempfile::tempdir().expect("create a temporary XDG_CONFIG_HOME");
         let runtime_dir = tempfile::tempdir().expect("create a temporary XDG_RUNTIME_DIR");
@@ -136,6 +180,13 @@ impl TestDaemon {
             .expect("open a fresh vault file")
             .unlock(DEMO_PASSPHRASE)
             .expect("seed the demo vault on first unlock");
+
+        if let Some(config) = backend_config {
+            let config_subdir = config_dir.path().join("secrets");
+            std::fs::create_dir_all(&config_subdir).expect("create secretsd's config directory");
+            std::fs::write(config_subdir.join("secretsd.toml"), config)
+                .expect("write a secretsd.toml selecting the configured backend");
+        }
 
         let bus = TestBus::start();
 
@@ -168,15 +219,16 @@ impl TestDaemon {
             daemon,
             output,
         };
-        harness.wait_until_ready();
+        harness.wait_until_ready(readiness_timeout);
         harness
     }
 
-    /// Block until `secrets status` succeeds against this daemon. Reuses
-    /// the CLI under test as its own readiness probe, rather than pulling
-    /// in a raw `zbus` proxy this harness would otherwise have no use for.
-    fn wait_until_ready(&self) {
-        let deadline = Instant::now() + Duration::from_secs(10);
+    /// Block until `secrets status` succeeds against this daemon, or
+    /// `timeout` elapses. Reuses the CLI under test as its own readiness
+    /// probe, rather than pulling in a raw `zbus` proxy this harness would
+    /// otherwise have no use for.
+    fn wait_until_ready(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
         loop {
             if self
                 .cli()
@@ -188,7 +240,7 @@ impl TestDaemon {
             }
             assert!(
                 Instant::now() < deadline,
-                "secretsd did not become reachable within 10s; captured output so far:\n{}",
+                "secretsd did not become reachable within {timeout:?}; captured output so far:\n{}",
                 self.captured_output()
             );
             thread::sleep(Duration::from_millis(20));

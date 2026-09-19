@@ -70,7 +70,7 @@ pub enum DaemonError {
     #[error("invalid backend configuration: {0}")]
     #[diagnostic(
         code(secrets::daemon::invalid_backend_config),
-        help("see docs/architecture/1password-integration.md for the required [backend] fields")
+        help("see docs/backends/1password.md for the required [backend] fields")
     )]
     InvalidBackendConfig(String),
 

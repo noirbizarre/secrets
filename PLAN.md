@@ -101,6 +101,10 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [x] 3.14 [ADR-014](docs/adr/014-cli-secret-disclosure-modes.md) —
       `secrets get`'s output modes (`--raw`/`--json`/`--clipboard`) and its
       default refusal to print a bare value to a terminal
+- [x] 3.15 [ADR-015](docs/adr/015-live-secret-service-topology.md) — Live
+      Secret Service topology: a background scan reconciles
+      `Collection`/`Item` objects instead of a fixed, fatal, one-shot scan
+      at startup; supersedes ADR-004's "fixed at startup" framing only
 
 ## 4. `secrets-core` (domain/core library)
 
@@ -117,12 +121,17 @@ This file is plain markdown, not rendered by `rust.tpl`.
       daemon boundary (`error.rs`, `dbus.rs`)
 - [x] 4.7 Unit tests: URI parsing, validation, escaping, resolution (27
       tests)
+- [x] 4.8 `ItemUri` (item-level `secret://<vault>/<item...>` reference,
+      no field), `FieldKind::is_secret`/`Display`/`FromStr`, and the
+      `FieldDisplay` wire type + `OBFUSCATED_FIELD_PLACEHOLDER` constant
+      — for `Manager.ShowItem` (`uri.rs`, `model.rs`, `dbus.rs`; see
+      [ADR-016](docs/adr/016-show-command-and-field-value-obfuscation.md))
 
 ## 5. `secretsd` (daemon)
 
 - [x] 5.1 D-Bus service bootstrap (`zbus::blocking`, `main.rs`)
 - [x] 5.2 `org.secrets.Manager`: Get / Resolve / List / Lock / Unlock /
-      Status (`manager.rs`)
+      Status / ShowItem (`manager.rs`)
 - [x] 5.3 Secret Service compat: Service / Collection / Item / Session /
       Prompt, plain algorithm (`secret_service/`)
 - [x] 5.4 Session & lock state machine (Locked / Unlocked) (`state.rs`)
@@ -145,6 +154,13 @@ This file is plain markdown, not rendered by `rust.tpl`.
       (`CreateCollection`/`CreateItem`/`SetSecret`/`Delete`/`SetAlias`) —
       deliberately deferred by ADR-004/ADR-013, tracked by
       [issue #8](https://github.com/noirbizarre/secrets/issues/8)
+- [x] 5.10 Live Secret Service topology — a background scan (periodic +
+      reactive on `Manager.Unlock`/`Lock`) reconciles `Collection`/`Item`
+      objects instead of a fixed, fatal, one-shot scan at startup; emits
+      the standard `CollectionCreated`/`CollectionDeleted`/`ItemCreated`/
+      `ItemDeleted` signals (`secret_service/refresh.rs`); supersedes
+      ADR-004's "fixed at startup" framing — see
+      [ADR-015](docs/adr/015-live-secret-service-topology.md)
 
 ## 6. `secrets-cli`
 
@@ -159,6 +175,10 @@ This file is plain markdown, not rendered by `rust.tpl`.
       crate (`config.rs`)
 - [x] 6.6 CLI integration tests (`assert_cmd`, against a test daemon) — see
       §9.5
+- [x] 6.7 `secrets show` — list an item's fields (name, kind, value),
+      secret-shaped values obfuscated server-side; requires unlock, no
+      terminal-disclosure refusal (unlike `get`) — see
+      [ADR-016](docs/adr/016-show-command-and-field-value-obfuscation.md)
 
 ## 7. Backends
 

@@ -107,4 +107,12 @@ against 1Password's own official Go SDK).
   reword them without notice, silently turning a `NotFound` into a
   generic `BackendUnavailable`. Acceptable degradation (still an error,
   just a less specific one), not a silent failure.
+- **`ItemsGetAll` rejects more than 50 item IDs per call** — another
+  undocumented, empirically-discovered constraint (found against a real
+  account whose vault exceeded it; see
+  `docs/architecture/1password-integration.md`'s own subsection on this).
+  `list_items` chunks around it transparently, so this is invisible to
+  every caller of this backend, but it is the same class of risk as
+  `CONFIRMED_SDK_VERSION` above: an unversioned behavior this backend
+  depends on staying stable.
 </content>

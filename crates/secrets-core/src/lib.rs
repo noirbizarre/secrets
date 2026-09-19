@@ -43,4 +43,4 @@ pub use error::{CoreError, Result};
 pub use model::{FieldKind, FieldMeta, Item, Vault};
 pub use resolver::Resolver;
 pub use secret_value::SecretValue;
-pub use uri::{ItemPath, SecretUri, UriError};
+pub use uri::{ItemPath, ItemUri, SecretUri, UriError};

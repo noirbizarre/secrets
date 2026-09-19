@@ -34,6 +34,13 @@ pub enum CliError {
     #[diagnostic(code(secrets::cli::not_found))]
     NotFound(String),
 
+    /// The referenced item does not exist (distinct from `NotFound`,
+    /// which always names a specific field — `secrets show` addresses a
+    /// whole item, with no field to name).
+    #[error("{0}")]
+    #[diagnostic(code(secrets::cli::item_not_found))]
+    ItemNotFound(String),
+
     /// The daemon refused the operation for permission reasons (including
     /// an incorrect unlock passphrase).
     #[error("{0}")]
@@ -112,6 +119,7 @@ impl From<ManagerError> for CliError {
             ManagerError::InvalidUri(message) => Self::InvalidUri(message),
             ManagerError::VaultLocked(message) => Self::VaultLocked(message),
             ManagerError::NotFound(message) => Self::NotFound(message),
+            ManagerError::ItemNotFound(message) => Self::ItemNotFound(message),
             ManagerError::PermissionDenied(message) => Self::PermissionDenied(message),
             ManagerError::InvalidOperation(message) => Self::InvalidOperation(message),
             ManagerError::BackendUnavailable(message) => Self::BackendUnavailable(message),

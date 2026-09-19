@@ -19,7 +19,9 @@ use std::io::IsTerminal;
 
 use cli::Command;
 use error::{CliError, Result};
-use output::{GetMode, GetPayload, ItemsPayload, ResolvePayload, StatusPayload, VaultsPayload};
+use output::{
+    GetMode, GetPayload, ItemsPayload, ResolvePayload, ShowPayload, StatusPayload, VaultsPayload,
+};
 use secrets_client::SecretsClient as Client;
 
 /// Run a parsed subcommand to completion, printing its output.
@@ -118,6 +120,24 @@ pub fn run(command: Command) -> Result<()> {
                 print_json(&ResolvePayload { uri: &resolved });
             } else {
                 println!("{resolved}");
+            }
+        }
+        Command::Show { uri, json } => {
+            let client = Client::connect()?;
+            // No `SecretValue` here to expose: a secret-shaped field's
+            // `value` is already the fixed obfuscated placeholder by the
+            // time it arrives — substituted server-side before it ever
+            // crossed the bus (see `secrets_core::dbus::show_item`).
+            let fields = client.show_item(&uri)?;
+            if json {
+                print_json(&ShowPayload {
+                    uri: &uri,
+                    fields: &fields,
+                });
+            } else {
+                for field in &fields {
+                    println!("{} ({}): {}", field.name, field.kind, field.value);
+                }
             }
         }
         Command::Inject(_) => return Err(CliError::NotYetImplemented { command: "inject" }),

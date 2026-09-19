@@ -6,40 +6,48 @@ use std::sync::Arc;
 
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
-use super::{PROMPT_PATH, SESSION_PATH, Secret, Topology, collection_path};
+use super::{LiveTopology, PROMPT_PATH, SESSION_PATH, Secret, Topology, collection_path};
 use crate::state::DaemonState;
 
 /// The root Secret Service object.
 pub struct ServiceIface {
     state: Arc<DaemonState>,
-    topology: Topology,
+    /// Shared with every `CollectionIface` and the background refresher —
+    /// see [`LiveTopology`]. Each method below takes its own
+    /// [`LiveTopology::snapshot`] rather than holding the lock for the
+    /// call's whole duration.
+    topology: LiveTopology,
 }
 
 impl ServiceIface {
-    /// Wrap daemon state and a topology snapshot as the root service
-    /// object.
+    /// Wrap daemon state and a shared, live topology handle as the root
+    /// service object.
     #[must_use]
-    pub fn new(state: Arc<DaemonState>, topology: Topology) -> Self {
+    pub fn new(state: Arc<DaemonState>, topology: LiveTopology) -> Self {
         Self { state, topology }
     }
+}
 
-    /// Items (across every vault) whose synthetic attributes are a
-    /// superset of `attributes` — see the module doc for what attributes
-    /// exist (`vault`, `item`, `field`).
-    fn matching_items(&self, attributes: &HashMap<String, String>) -> Vec<&super::KnownItem> {
-        self.topology
-            .items
-            .iter()
-            .filter(|known| {
-                attributes.iter().all(|(key, value)| match key.as_str() {
-                    "vault" => &known.vault == value,
-                    "item" => known.item.to_string() == *value,
-                    "field" => &known.field == value,
-                    _ => false,
-                })
+/// Items (across every vault) whose synthetic attributes are a superset of
+/// `attributes` — see the module doc for what attributes exist (`vault`,
+/// `item`, `field`). A free function, not a method, since it only ever
+/// needs a `Topology` snapshot already taken by its caller, not `&self`.
+fn matching_items<'t>(
+    topology: &'t Topology,
+    attributes: &HashMap<String, String>,
+) -> Vec<&'t super::KnownItem> {
+    topology
+        .items
+        .iter()
+        .filter(|known| {
+            attributes.iter().all(|(key, value)| match key.as_str() {
+                "vault" => &known.vault == value,
+                "item" => known.item.to_string() == *value,
+                "field" => &known.field == value,
+                _ => false,
             })
-            .collect()
-    }
+        })
+        .collect()
 }
 
 #[zbus::interface(name = "org.freedesktop.Secret.Service")]
@@ -48,6 +56,7 @@ impl ServiceIface {
     #[zbus(property)]
     fn collections(&self) -> Vec<OwnedObjectPath> {
         self.topology
+            .snapshot()
             .vaults
             .iter()
             .map(|name| collection_path(name))
@@ -90,27 +99,33 @@ impl ServiceIface {
         &self,
         attributes: HashMap<String, String>,
     ) -> (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) {
-        let unlocked_now = self.state.is_unlocked();
-        let matches: Vec<OwnedObjectPath> = self
-            .matching_items(&attributes)
+        // Reflects both the daemon-wide lock and the active backend's own
+        // session state (see `DaemonState::is_accessible`) — not just the
+        // daemon lock, so a 1Password session needing (re)authentication
+        // reports matches as locked here too.
+        let accessible_now = self.state.is_accessible();
+        let topology = self.topology.snapshot();
+        let matches: Vec<OwnedObjectPath> = matching_items(&topology, &attributes)
             .into_iter()
             .map(|known| known.path.clone())
             .collect();
-        if unlocked_now {
+        if accessible_now {
             (matches, Vec::new())
         } else {
             (Vec::new(), matches)
         }
     }
 
-    /// Reflects the daemon-wide lock state for the given objects. Cannot
-    /// itself prompt for a passphrase (see [`super::prompt`]) — an object
-    /// that is still locked stays in `locked`, with the shared prompt
-    /// object returned for spec-compliant discoverability, not because it
-    /// can do anything about it. Use `secrets unlock` instead.
+    /// Reflects the daemon-wide lock *and* backend session state for the
+    /// given objects. Cannot itself prompt for a passphrase (see
+    /// [`super::prompt`]) — an object that is still locked stays in
+    /// `locked`, with the shared prompt object returned for spec-compliant
+    /// discoverability, not because it can do anything about it. Use
+    /// `secrets unlock` instead (and, for a backend session needing
+    /// reauthorization, its own app — see `docs/backends/1password.md`).
     fn unlock(&self, objects: Vec<OwnedObjectPath>) -> (Vec<OwnedObjectPath>, OwnedObjectPath) {
         let prompt: OwnedObjectPath = PROMPT_PATH.try_into().expect("valid object path");
-        if self.state.is_unlocked() {
+        if self.state.is_accessible() {
             (objects, "/".try_into().expect("valid object path"))
         } else {
             (Vec::new(), prompt)
@@ -131,15 +146,10 @@ impl ServiceIface {
         items: Vec<OwnedObjectPath>,
         session: OwnedObjectPath,
     ) -> zbus::fdo::Result<HashMap<OwnedObjectPath, Secret>> {
-        if !self.state.is_unlocked() {
-            return Err(zbus::fdo::Error::Failed(
-                "the store is locked; run `secrets unlock` first".to_string(),
-            ));
-        }
+        let topology = self.topology.snapshot();
         let mut secrets = HashMap::new();
         for item_object_path in items {
-            let Some(known) = self
-                .topology
+            let Some(known) = topology
                 .items
                 .iter()
                 .find(|known| known.path == item_object_path)
@@ -148,8 +158,7 @@ impl ServiceIface {
             };
             let value = self
                 .state
-                .backend()
-                .get_field(&known.vault, &known.item, &known.field)
+                .read_field(&known.vault, &known.item, &known.field)
                 .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
             secrets.insert(
                 item_object_path,
@@ -168,7 +177,7 @@ impl ServiceIface {
     /// any. No other aliases are recognised in the MVP.
     fn read_alias(&self, name: &str) -> OwnedObjectPath {
         if name == "default"
-            && let Some(first) = self.topology.vaults.first()
+            && let Some(first) = self.topology.snapshot().vaults.first()
         {
             return collection_path(first);
         }
@@ -181,5 +190,95 @@ impl ServiceIface {
         Err(zbus::fdo::Error::NotSupported(
             "setting aliases is not supported in this MVP".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use secrets_core::{BackendStatus, ItemPath};
+
+    use super::*;
+    use crate::test_support::{state_over_fresh_vault, state_with_backend_session};
+
+    fn topology_over_github_password() -> Topology {
+        let item = ItemPath::new(vec!["GitHub".to_string()]).unwrap();
+        let path = super::super::item_path("Personal", &item, "password");
+        Topology {
+            vaults: vec!["Personal".to_string()],
+            items: vec![super::super::KnownItem {
+                vault: "Personal".to_string(),
+                item,
+                field: "password".to_string(),
+                path,
+            }],
+        }
+    }
+
+    fn service_over(state: DaemonState) -> ServiceIface {
+        ServiceIface::new(
+            Arc::new(state),
+            LiveTopology::new(topology_over_github_password()),
+        )
+    }
+
+    #[test]
+    fn search_items_reports_matches_as_locked_when_the_backend_session_requires_authentication() {
+        // Regression guard for #7: an `AlwaysUnlocked` backend (like
+        // 1Password) must still show `SearchItems` matches as locked when
+        // its own session is unmet.
+        let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
+        state.unlock("test passphrase").unwrap();
+        let service = service_over(state);
+
+        let (unlocked, locked) = service.search_items(HashMap::from([(
+            "vault".to_string(),
+            "Personal".to_string(),
+        )]));
+        assert!(unlocked.is_empty());
+        assert_eq!(locked.len(), 1);
+    }
+
+    #[test]
+    fn search_items_reports_matches_as_unlocked_when_accessible() {
+        let (_dir, state) = state_over_fresh_vault();
+        state.unlock("test passphrase").unwrap();
+        let service = service_over(state);
+
+        let (unlocked, locked) = service.search_items(HashMap::from([(
+            "vault".to_string(),
+            "Personal".to_string(),
+        )]));
+        assert_eq!(unlocked.len(), 1);
+        assert!(locked.is_empty());
+    }
+
+    #[test]
+    fn get_secrets_fails_when_the_backend_session_requires_authentication() {
+        let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
+        state.unlock("test passphrase").unwrap();
+        let service = service_over(state);
+        let topology = topology_over_github_password();
+        let session: OwnedObjectPath = SESSION_PATH.try_into().unwrap();
+
+        let result = service.get_secrets(vec![topology.items[0].path.clone()], session);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_secrets_succeeds_when_accessible() {
+        let (_dir, state) = state_over_fresh_vault();
+        state.unlock("test passphrase").unwrap();
+        let service = service_over(state);
+        let topology = topology_over_github_password();
+        let session: OwnedObjectPath = SESSION_PATH.try_into().unwrap();
+
+        let secrets = service
+            .get_secrets(vec![topology.items[0].path.clone()], session)
+            .unwrap();
+        let secret = secrets.values().next().unwrap();
+        assert_eq!(
+            String::from_utf8(secret.value.clone()).unwrap(),
+            "correct horse battery staple"
+        );
     }
 }

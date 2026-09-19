@@ -25,7 +25,7 @@
 mod support;
 
 use predicates::prelude::*;
-use support::{DEMO_PASSPHRASE, DEMO_PASSWORD, TestBus, TestDaemon};
+use support::{DEMO_PASSPHRASE, DEMO_PASSWORD, DEMO_TOTP, DEMO_USERNAME, TestBus, TestDaemon};
 
 #[test]
 fn status_reports_locked_before_any_unlock() {
@@ -244,6 +244,111 @@ fn resolve_prints_the_canonicalised_uri_and_never_the_value() {
         .success()
         .stdout("secret://Personal/GitHub/password\n")
         .stdout(predicate::str::contains(DEMO_PASSWORD).not());
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn show_before_unlock_is_refused() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["show", "secret://Personal/GitHub"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(
+            predicate::str::contains("vault 'Personal' is locked")
+                .and(predicate::str::contains("secrets unlock")),
+        );
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn show_after_unlock_reveals_safe_fields_and_obfuscates_secret_fields() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    // Field order is alphabetical (the local backend stores fields in a
+    // `BTreeMap`): password, totp, username.
+    daemon
+        .cli()
+        .args(["show", "secret://Personal/GitHub"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "password (password): \u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\ntotp (totp): \u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\nusername (username): {DEMO_USERNAME}\n"
+        ))
+        .stdout(predicate::str::contains(DEMO_PASSWORD).not())
+        .stdout(predicate::str::contains(DEMO_TOTP).not());
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn show_with_json_has_the_documented_shape() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    let placeholder = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+    let expected = serde_json::json!({
+        "uri": "secret://Personal/GitHub",
+        "fields": [
+            {"name": "password", "kind": "password", "value": placeholder},
+            {"name": "totp", "kind": "totp", "value": placeholder},
+            {"name": "username", "kind": "username", "value": DEMO_USERNAME},
+        ],
+    });
+
+    let assert = daemon
+        .cli()
+        .args(["show", "secret://Personal/GitHub", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(DEMO_PASSWORD).not())
+        .stdout(predicate::str::contains(DEMO_TOTP).not());
+
+    // Compared as parsed JSON, not a raw string: `ShowPayload`'s field
+    // declaration order (`uri` then `fields`) need not match `json!`'s
+    // sorted-key `Value` rendering for the two to mean the same thing.
+    let actual: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("valid JSON");
+    assert_eq!(actual, expected);
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn show_of_an_unknown_item_is_not_found() {
+    let daemon = TestDaemon::start();
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    daemon
+        .cli()
+        .args(["show", "secret://Personal/does-not-exist"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "item not found: secret://Personal/does-not-exist",
+        ));
 
     daemon.assert_no_secrets_leaked();
 }
