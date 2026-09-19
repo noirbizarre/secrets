@@ -127,7 +127,7 @@ fn list_without_a_vault_lists_vault_names_even_while_locked() {
         .arg("list")
         .assert()
         .success()
-        .stdout("Infrastructure\nPersonal\n");
+        .stdout("default@Infrastructure\ndefault@Personal\n");
 
     daemon.assert_no_secrets_leaked();
 }
@@ -172,7 +172,7 @@ fn get_while_locked_reports_vault_locked_with_an_unlock_hint() {
         .failure()
         .code(1)
         .stderr(
-            predicate::str::contains("vault 'Personal' is locked")
+            predicate::str::contains("vault 'default@Personal' is locked")
                 .and(predicate::str::contains("secrets unlock")),
         );
 
@@ -221,7 +221,7 @@ fn get_with_an_unknown_field_reports_not_found() {
         .failure()
         .code(1)
         .stderr(predicate::str::contains(
-            "secret not found: secret://Personal/GitHub/does-not-exist",
+            "secret not found: secret://default@Personal/GitHub/does-not-exist",
         ));
 
     daemon.assert_no_secrets_leaked();
@@ -259,7 +259,7 @@ fn show_before_unlock_is_refused() {
         .failure()
         .code(1)
         .stderr(
-            predicate::str::contains("vault 'Personal' is locked")
+            predicate::str::contains("vault 'default@Personal' is locked")
                 .and(predicate::str::contains("secrets unlock")),
         );
 
@@ -347,7 +347,7 @@ fn show_of_an_unknown_item_is_not_found() {
         .failure()
         .code(1)
         .stderr(predicate::str::contains(
-            "item not found: secret://Personal/does-not-exist",
+            "item not found: secret://default@Personal/does-not-exist",
         ));
 
     daemon.assert_no_secrets_leaked();
@@ -444,7 +444,7 @@ fn list_with_json_prints_vault_names_as_json() {
         .args(["list", "--json"])
         .assert()
         .success()
-        .stdout("{\"vaults\":[\"Infrastructure\",\"Personal\"]}\n");
+        .stdout("{\"vaults\":[\"default@Infrastructure\",\"default@Personal\"]}\n");
 
     daemon.assert_no_secrets_leaked();
 }
@@ -525,4 +525,111 @@ fn get_with_a_missing_uri_argument_is_a_clap_usage_error() {
         .failure()
         .code(2)
         .stderr(predicate::str::contains("Usage"));
+}
+
+#[test]
+fn stores_command_lists_the_default_store_with_its_status() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .arg("stores")
+        .assert()
+        .success()
+        .stdout("default: locked\n");
+
+    daemon
+        .cli()
+        .arg("unlock")
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success();
+
+    daemon
+        .cli()
+        .arg("stores")
+        .assert()
+        .success()
+        .stdout("default: unlocked\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn stores_with_json_prints_every_store_and_its_status() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["stores", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"stores\":[{\"id\":\"default\",\"status\":\"locked\"}]}\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn list_with_store_filters_and_strips_the_store_prefix() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["list", "--store", "default"])
+        .assert()
+        .success()
+        .stdout("Infrastructure\nPersonal\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn lock_and_unlock_accept_an_explicit_store_flag() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["unlock", "--store", "default"])
+        .write_stdin(format!("{DEMO_PASSPHRASE}\n"))
+        .assert()
+        .success()
+        .stdout("unlocked\n");
+
+    daemon
+        .cli()
+        .args(["status", "--store", "default"])
+        .assert()
+        .success()
+        .stdout("unlocked\n");
+
+    daemon
+        .cli()
+        .args(["lock", "--store", "default"])
+        .assert()
+        .success()
+        .stdout("locked\n");
+
+    daemon
+        .cli()
+        .args(["status", "--store", "default"])
+        .assert()
+        .success()
+        .stdout("locked\n");
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn an_explicit_but_unconfigured_store_is_reported_as_not_found() {
+    let daemon = TestDaemon::start();
+
+    daemon
+        .cli()
+        .args(["status", "--store", "ghost"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("no such store: ghost"));
+
+    daemon.assert_no_secrets_leaked();
 }

@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use secretsd::backend::onepassword::ffi::LIBRARY_PATH_OVERRIDE_ENV;
 use secretsd::secret_service::collection_path;
-use support::TestDaemon;
+use support::{TestDaemon, default_store_id};
 
 #[test]
 fn unlocking_for_the_first_time_registers_the_new_vaults_without_a_restart() {
@@ -52,9 +52,10 @@ fn unlocking_for_the_first_time_registers_the_new_vaults_without_a_restart() {
     // periodic scan eventually picked this up, this would time out long
     // before that — proving the trigger, not just that a scan eventually
     // happens at all.
+    let store = default_store_id();
     daemon.wait_until_collections(&[
-        collection_path("Personal"),
-        collection_path("Infrastructure"),
+        collection_path(&store, "Personal"),
+        collection_path(&store, "Infrastructure"),
     ]);
 
     // The signal itself arrived too, not just the end state — a real
@@ -65,8 +66,8 @@ fn unlocking_for_the_first_time_registers_the_new_vaults_without_a_restart() {
         .expect("CollectionCreated must have been emitted for at least one of the two new vaults");
     let args = signal.args().expect("CollectionCreated's argument decodes");
     assert!(
-        *args.collection() == collection_path("Personal")
-            || *args.collection() == collection_path("Infrastructure"),
+        *args.collection() == collection_path(&store, "Personal")
+            || *args.collection() == collection_path(&store, "Infrastructure"),
         "the signal's argument must be one of the two newly-created collections"
     );
 
@@ -134,7 +135,7 @@ fn a_backend_that_fails_during_topology_discovery_does_not_crash_the_daemon() {
     // own doc comment) — it succeeds even against a fixture that will
     // reject every real call, so `secretsd` starts normally and only the
     // background refresher's first scan (`list_vaults`) actually fails.
-    let config = "[backend]\ntype = \"1password\"\naccount_name = \"fixture-account\"\n";
+    let config = "[store.default]\ntype = \"1password\"\naccount_name = \"fixture-account\"\n";
     let fixture_path = fixture_path.to_str().unwrap();
     let daemon =
         TestDaemon::start_with_backend_config(config, &[(LIBRARY_PATH_OVERRIDE_ENV, fixture_path)]);

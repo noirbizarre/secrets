@@ -41,7 +41,7 @@ pub mod session;
 
 use std::sync::{Arc, Mutex};
 
-use secrets_core::ItemPath;
+use secrets_core::{ItemPath, StoreId};
 use zbus::zvariant::OwnedObjectPath;
 
 /// The root `org.freedesktop.Secret.Service` object path.
@@ -98,31 +98,45 @@ pub fn slug(input: &str) -> String {
     out
 }
 
-/// The object path for a vault's `Collection`.
+/// The object path for a vault's `Collection`, nested under its store
+/// (ADR-018): `/collection/<store_slug>/<vault_slug>`, real path segments
+/// rather than a concatenated single one, so two stores can never collide
+/// at the same path even if they happen to share a vault name — string
+/// concatenation (`slug(store) + slug(vault)`) could not make that
+/// guarantee (`"ab"`+`"c"` and `"a"`+`"bc"` collide; distinct path
+/// segments cannot). Reshapes today's single-store path too — Secret
+/// Service object paths are already documented (ADR-013/015) as
+/// dynamically discovered, never persisted, by well-behaved clients.
 #[must_use]
-pub fn collection_path(vault: &str) -> OwnedObjectPath {
-    format!("{SERVICE_PATH}/collection/{}", slug(vault))
-        .try_into()
-        .expect("slug() always produces a valid object path segment")
+pub fn collection_path(store: &StoreId, vault: &str) -> OwnedObjectPath {
+    format!(
+        "{SERVICE_PATH}/collection/{}/{}",
+        slug(store.as_str()),
+        slug(vault)
+    )
+    .try_into()
+    .expect("slug() always produces a valid object path segment")
 }
 
-/// The object path for one (vault, item, field) triple's `Item`.
+/// The object path for one (store, vault, item, field) triple's `Item`.
 #[must_use]
-pub fn item_path(vault: &str, item: &ItemPath, field: &str) -> OwnedObjectPath {
+pub fn item_path(store: &StoreId, vault: &str, item: &ItemPath, field: &str) -> OwnedObjectPath {
     let mut segments: Vec<String> = item.segments().iter().map(|s| slug(s)).collect();
     segments.push(slug(field));
-    format!("{}/{}", collection_path(vault), segments.join("_"))
+    format!("{}/{}", collection_path(store, vault), segments.join("_"))
         .try_into()
         .expect("slug() always produces a valid object path segment")
 }
 
-/// One (vault, item, field) triple, and the object path it is currently
-/// registered at. Part of a [`Topology`] snapshot — the D-Bus object this
-/// describes can be added or removed by [`refresh::reconcile`] as the
-/// backend's own contents change, so this is a point-in-time fact, not a
-/// permanent one.
+/// One (store, vault, item, field) quadruple, and the object path it is
+/// currently registered at. Part of a [`Topology`] snapshot — the D-Bus
+/// object this describes can be added or removed by
+/// [`refresh::reconcile`] as a store's own contents change, so this is a
+/// point-in-time fact, not a permanent one.
 #[derive(Debug, Clone)]
 pub struct KnownItem {
+    /// The store this field's vault lives in (ADR-018).
+    pub store: StoreId,
     /// The vault this field belongs to.
     pub vault: String,
     /// The item path this field belongs to.
@@ -133,15 +147,20 @@ pub struct KnownItem {
     pub path: OwnedObjectPath,
 }
 
-/// A snapshot of every vault and (vault, item, field) triple the backend
-/// reported the last time it was scanned — see [`LiveTopology`] for the
-/// shared, mutable handle every Secret Service interface object actually
-/// reads from.
+/// A snapshot of every (store, vault) pair and (store, vault, item, field)
+/// quadruple every configured store reported the last time it was
+/// scanned — see [`LiveTopology`] for the shared, mutable handle every
+/// Secret Service interface object actually reads from.
 #[derive(Debug, Clone, Default)]
 pub struct Topology {
-    /// Every vault name, as of the last scan.
-    pub vaults: Vec<String>,
-    /// Every (vault, item, field) triple, as of the last scan.
+    /// Every `(store, vault name)` pair, as of the last scan — sorted by
+    /// `(StoreId, vault name)` explicitly in [`discover`], not left to
+    /// whatever order stores/backends happen to report: this ordering is
+    /// what defines "the first vault" for the `"default"` alias
+    /// (ADR-018 redefines ADR-013's "the first vault", singular, to "the
+    /// first `(store, vault)` pair" over this same deterministic order).
+    pub vaults: Vec<(StoreId, String)>,
+    /// Every (store, vault, item, field) quadruple, as of the last scan.
     pub items: Vec<KnownItem>,
 }
 
@@ -179,24 +198,35 @@ impl LiveTopology {
     }
 }
 
-/// Discover the current topology by walking every vault and item the
-/// backend reports. Available regardless of lock state (see
-/// [`crate::state::DaemonState::list_vaults`]).
+/// Discover the current topology by walking every vault and item every
+/// configured store reports (ADR-018). Available regardless of lock state
+/// (see [`crate::state::DaemonState::list_all_vaults`]).
 ///
 /// # Errors
 ///
-/// Propagates a backend error, if any.
+/// Propagates the first store's backend error, if any — matching
+/// [`crate::state::DaemonState::list_all_vaults`]'s own "fail the whole
+/// scan" behavior; [`refresh::reconcile`]'s caller already treats a
+/// failed scan as "keep the previous topology", never fatal (ADR-015).
 pub fn discover(state: &crate::state::DaemonState) -> secrets_core::Result<Topology> {
     let mut topology = Topology::default();
-    for vault in state.list_vaults()? {
-        topology.vaults.push(vault.name.clone());
-        for item in state.list_items(&vault.name)? {
+    let mut all_vaults = state.list_all_vaults()?;
+    // Deterministic order, independent of any backend's own iteration
+    // order — this is what "the first vault" (the `"default"` alias,
+    // ADR-013/ADR-018) actually means.
+    all_vaults.sort_by(|(store_a, vault_a), (store_b, vault_b)| {
+        (store_a, &vault_a.name).cmp(&(store_b, &vault_b.name))
+    });
+    for (store, vault) in all_vaults {
+        topology.vaults.push((store.clone(), vault.name.clone()));
+        for item in state.list_items(Some(&store), &vault.name)? {
             for field in &item.fields {
                 topology.items.push(KnownItem {
+                    store: store.clone(),
                     vault: vault.name.clone(),
                     item: item.path.clone(),
                     field: field.name.clone(),
-                    path: item_path(&vault.name, &item.path, &field.name),
+                    path: item_path(&store, &vault.name, &item.path, &field.name),
                 });
             }
         }

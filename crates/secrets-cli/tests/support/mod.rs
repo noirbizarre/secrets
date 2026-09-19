@@ -153,7 +153,7 @@ impl TestDaemon {
     #[must_use]
     pub fn start_with_1password(account_name: &str) -> Self {
         let config =
-            format!("[backend]\ntype = \"1password\"\naccount_name = \"{account_name}\"\n");
+            format!("[store.default]\ntype = \"1password\"\naccount_name = \"{account_name}\"\n");
         Self::start_with(Some(config), Duration::from_secs(60))
     }
 

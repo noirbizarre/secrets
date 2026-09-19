@@ -1,14 +1,17 @@
-//! Backend selection configuration.
+//! Store configuration: which backend instances a daemon activates.
 //!
 //! Loads `~/.config/secrets/secretsd.toml` (following the same XDG
 //! convention `secrets-cli`'s own `Config` uses, under a different
 //! filename so the two never collide in the shared `secrets/` prefix
-//! directory). An absent file — today's only supported shape until a
-//! second backend is configured — keeps behaving exactly as before this
-//! module was wired into [`crate::state::open_default_state`].
+//! directory). An absent file, or one with no `[store.*]` table at all,
+//! still yields exactly one implicit store (see
+//! `crate::state::open_registry`) — today's zero-config behavior is
+//! unaffected by ADR-018.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use secrets_core::StoreId;
 use serde::Deserialize;
 
 use crate::error::{DaemonError, Result};
@@ -17,22 +20,32 @@ use crate::error::{DaemonError, Result};
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Which backend to activate. Defaults to [`BackendKind::Local`], so
-    /// an absent `[backend]` table — today's only supported shape — keeps
-    /// behaving exactly as it does today.
-    #[serde(default)]
-    pub backend: BackendKind,
+    /// `[store.<id>]` tables, one per configured backend instance
+    /// (ADR-018). Empty — file absent, or present with no `[store.*]`
+    /// table at all — means "use the implicit default store"; resolving
+    /// that default is `crate::state::open_registry`'s job, not this
+    /// type's, so an empty map here is a valid, fully-parsed `Config`,
+    /// not a special case.
+    ///
+    /// `rename` so the Rust field stays pluralized (`stores`, matching
+    /// "a map of stores") while the TOML syntax is the singular
+    /// `[store.<id>]` (matching "one store's own table") — the same
+    /// singular/plural split TOML's own array-of-tables convention uses.
+    #[serde(default, rename = "store")]
+    pub stores: BTreeMap<StoreId, BackendKind>,
 }
 
 impl Config {
     /// Load `~/.config/secrets/secretsd.toml`, or return the default
-    /// (local backend) configuration if it does not exist.
+    /// (no configured stores) configuration if it does not exist.
     ///
     /// # Errors
     ///
     /// Returns [`DaemonError::ConfigUnreadable`] if the file exists but
     /// cannot be read, or is not valid TOML at all. Returns
-    /// [`DaemonError::InvalidBackendConfig`] if `[backend] type =
+    /// [`DaemonError::LegacyBackendConfig`] if the file still has the
+    /// pre-ADR-018 `[backend]` table. Returns
+    /// [`DaemonError::InvalidBackendConfig`] if some `[store.<id>] type =
     /// "1password"` is missing its required `account_name` field — a more
     /// actionable diagnostic than the generic TOML error that field's
     /// absence would otherwise produce. Any other shape mismatch (e.g. an
@@ -62,12 +75,16 @@ impl Config {
     /// See [`Config::load`].
     fn parse(contents: &str, path: &std::path::Path) -> Result<Self> {
         toml::from_str(contents).map_err(|error| {
-            // A missing `account_name` is the one shape mismatch common
-            // enough, and specific enough, to diagnose precisely rather
-            // than surface as a raw TOML parse error — see
-            // `missing_1password_account_name`'s own doc comment.
+            // Checked in this order because each is a strictly more
+            // specific diagnosis of the same underlying parse failure:
+            // "you're still using the removed [backend] table" is worth
+            // naming before "a [store.*] table you do have is missing a
+            // field", which is worth naming before the generic fallback.
+            if let Some(message) = legacy_backend_table(contents) {
+                return DaemonError::LegacyBackendConfig(message);
+            }
             match missing_1password_account_name(contents) {
-                Some(message) => DaemonError::InvalidBackendConfig(message.to_string()),
+                Some(message) => DaemonError::InvalidBackendConfig(message),
                 None => DaemonError::ConfigUnreadable {
                     path: path.to_path_buf(),
                     reason: error.to_string(),
@@ -77,24 +94,46 @@ impl Config {
     }
 }
 
-/// If `contents` selects `[backend] type = "1password"` but omits
-/// `account_name`, returns a specific, actionable diagnostic — otherwise
-/// `None`, so the caller falls back to the raw TOML parse error. Only
-/// called once the strict [`Config`] parse has already failed, so this
-/// never masks a config that actually parses fine.
-fn missing_1password_account_name(contents: &str) -> Option<&'static str> {
+/// If `contents` still has a top-level `[backend]` table — the shape
+/// ADR-018 replaced with `[store.<id>]` — returns an actionable rewrite
+/// message naming the exact fix, instead of letting `deny_unknown_fields`
+/// report it as an opaque "unknown field `backend`".
+///
+/// Only called once the strict [`Config`] parse has already failed, so
+/// this never masks a config that actually parses fine (e.g. a `[store]`
+/// table that happens to also define an unrelated key coincidentally
+/// named `backend` nested somewhere else — `raw.get("backend")` only
+/// looks at the top level).
+fn legacy_backend_table(contents: &str) -> Option<String> {
     let raw: toml::Value = toml::from_str(contents).ok()?;
     let backend = raw.get("backend")?;
-    if backend.get("type")?.as_str()? != "1password" {
-        return None;
+    Some(format!(
+        "the [backend] table was removed in favor of [store.<id>] tables (ADR-018) — \
+         rewrite [backend] as [store.default] with the same fields (found: {backend})"
+    ))
+}
+
+/// If `contents` has a `[store.<id>] type = "1password"` table missing
+/// `account_name`, returns a specific, actionable diagnostic naming that
+/// store — otherwise `None`, so the caller falls back to the raw TOML
+/// parse error. Only called once the strict [`Config`] parse has already
+/// failed, so this never masks a config that actually parses fine.
+fn missing_1password_account_name(contents: &str) -> Option<String> {
+    let raw: toml::Value = toml::from_str(contents).ok()?;
+    let stores = raw.get("store")?.as_table()?;
+    for (id, store) in stores {
+        if store.get("type")?.as_str()? != "1password" {
+            continue;
+        }
+        if store.get("account_name").is_some() {
+            continue;
+        }
+        return Some(format!(
+            "[store.{id}] type = \"1password\" requires an `account_name` field — \
+             the account name or UUID shown in the Desktop app's sidebar"
+        ));
     }
-    if backend.get("account_name").is_some() {
-        return None;
-    }
-    Some(
-        "[backend] type = \"1password\" requires an `account_name` field — \
-         the account name or UUID shown in the Desktop app's sidebar",
-    )
+    None
 }
 
 /// The config file's path, if `XDG_CONFIG_HOME` (or its fallback) could be
@@ -104,14 +143,15 @@ fn config_path() -> Option<PathBuf> {
     Some(xdg.get_config_home()?.join("secretsd.toml"))
 }
 
-/// Which backend implementation a daemon instance activates.
+/// Which backend implementation one configured store activates.
 ///
-/// Exactly one is active per daemon instance: this project does not do
-/// multi-backend or multi-vault routing (see ADR-0008).
+/// Distinct from *which* store: several `[store.<id>]` tables may each
+/// select the same `BackendKind` (e.g. two `type = "local"` stores backed
+/// by different vault files) — see ADR-018.
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum BackendKind {
-    /// The local encrypted-file backend — the only one implemented so far.
+    /// The local encrypted-file backend.
     #[default]
     Local,
     /// 1Password Desktop, via its native IPC library — see
@@ -131,7 +171,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_missing_config_file_yields_the_default_local_configuration() {
+    fn a_missing_config_file_yields_no_configured_stores() {
         // Isolated from the developer's/CI runner's *real*
         // `~/.config/secrets/secretsd.toml`, if one exists (e.g. a
         // developer who has already configured a real backend for their
@@ -148,60 +188,74 @@ mod tests {
         unsafe { std::env::set_var("XDG_CONFIG_HOME", empty_config_home.path()) };
 
         let config = Config::load().unwrap();
-        assert_eq!(config.backend, BackendKind::Local);
+        assert!(config.stores.is_empty());
     }
 
     #[test]
-    fn an_absent_backend_table_defaults_to_local() {
+    fn an_empty_config_file_yields_no_configured_stores() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.backend, BackendKind::Local);
+        assert!(config.stores.is_empty());
     }
 
     #[test]
-    fn an_explicit_local_backend_type_parses() {
-        let config: Config = toml::from_str("[backend]\ntype = \"local\"\n").unwrap();
-        assert_eq!(config.backend, BackendKind::Local);
-    }
-
-    #[test]
-    fn a_1password_backend_type_parses_with_its_account_name() {
-        let config: Config =
-            toml::from_str("[backend]\ntype = \"1password\"\naccount_name = \"MyAccount\"\n")
-                .unwrap();
+    fn a_store_table_parses_into_its_named_entry() {
+        let config: Config = toml::from_str("[store.default]\ntype = \"local\"\n").unwrap();
         assert_eq!(
-            config.backend,
-            BackendKind::OnePassword {
-                account_name: "MyAccount".to_string()
-            }
+            config.stores.get(&StoreId::new("default").unwrap()),
+            Some(&BackendKind::Local)
         );
     }
 
     #[test]
-    fn a_1password_backend_type_without_an_account_name_is_rejected() {
+    fn several_store_tables_parse_into_their_own_named_entries() {
+        let config: Config = toml::from_str(
+            "[store.personal]\ntype = \"local\"\n\n\
+             [store.work]\ntype = \"1password\"\naccount_name = \"Work\"\n",
+        )
+        .unwrap();
+        assert_eq!(config.stores.len(), 2);
+        assert_eq!(
+            config.stores.get(&StoreId::new("personal").unwrap()),
+            Some(&BackendKind::Local)
+        );
+        assert_eq!(
+            config.stores.get(&StoreId::new("work").unwrap()),
+            Some(&BackendKind::OnePassword {
+                account_name: "Work".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn a_1password_store_missing_an_account_name_is_rejected() {
         let result: std::result::Result<Config, _> =
-            toml::from_str("[backend]\ntype = \"1password\"\n");
+            toml::from_str("[store.work]\ntype = \"1password\"\n");
         assert!(result.is_err());
     }
 
     #[test]
-    fn a_1password_backend_type_without_an_account_name_reports_an_actionable_error() {
+    fn a_1password_store_missing_an_account_name_names_the_specific_store_id() {
         // Regression guard: this must not degrade to the generic
         // `ConfigUnreadable` a raw TOML parse failure would otherwise
-        // produce (see `missing_1password_account_name`).
+        // produce (see `missing_1password_account_name`), and must name
+        // *which* store is broken when more than one is configured.
         let error = Config::parse(
-            "[backend]\ntype = \"1password\"\n",
+            "[store.personal]\ntype = \"local\"\n\n[store.work]\ntype = \"1password\"\n",
             std::path::Path::new("test.toml"),
         )
         .unwrap_err();
-        assert!(matches!(error, DaemonError::InvalidBackendConfig(_)));
+        match error {
+            DaemonError::InvalidBackendConfig(message) => assert!(message.contains("store.work")),
+            other => panic!("expected InvalidBackendConfig, got {other:?}"),
+        }
     }
 
     #[test]
-    fn an_unrecognised_backend_type_still_reports_config_unreadable() {
+    fn an_unrecognised_store_type_still_reports_config_unreadable() {
         // A different shape mismatch must not be misdiagnosed as the
         // 1Password-specific case.
         let error = Config::parse(
-            "[backend]\ntype = \"bitwarden\"\n",
+            "[store.default]\ntype = \"bitwarden\"\n",
             std::path::Path::new("test.toml"),
         )
         .unwrap_err();
@@ -209,9 +263,9 @@ mod tests {
     }
 
     #[test]
-    fn an_unrecognised_backend_type_is_rejected() {
+    fn an_unrecognised_store_type_is_rejected() {
         let result: std::result::Result<Config, _> =
-            toml::from_str("[backend]\ntype = \"bitwarden\"\n");
+            toml::from_str("[store.default]\ntype = \"bitwarden\"\n");
         assert!(result.is_err());
     }
 
@@ -219,5 +273,38 @@ mod tests {
     fn an_unknown_top_level_field_is_rejected() {
         let result: std::result::Result<Config, _> = toml::from_str("unknown = true\n");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn an_invalid_store_id_is_rejected() {
+        let result: std::result::Result<Config, _> =
+            toml::from_str("[store.\"has space\"]\ntype = \"local\"\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_legacy_backend_table_is_rejected_with_an_actionable_migration_message() {
+        let error = Config::parse(
+            "[backend]\ntype = \"local\"\n",
+            std::path::Path::new("test.toml"),
+        )
+        .unwrap_err();
+        match error {
+            DaemonError::LegacyBackendConfig(message) => {
+                assert!(message.contains("[store.default]"));
+                assert!(message.contains("ADR-018"));
+            }
+            other => panic!("expected LegacyBackendConfig, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_legacy_backend_table_is_rejected_even_with_1password_fields() {
+        let error = Config::parse(
+            "[backend]\ntype = \"1password\"\naccount_name = \"Work\"\n",
+            std::path::Path::new("test.toml"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, DaemonError::LegacyBackendConfig(_)));
     }
 }

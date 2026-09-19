@@ -64,6 +64,30 @@ pub enum CliError {
     #[diagnostic(code(secrets::cli::backend_requires_authentication))]
     BackendRequiresAuthentication(String),
 
+    /// An unqualified vault name (ADR-018) exists in more than one
+    /// configured store.
+    #[error("{0}")]
+    #[diagnostic(
+        code(secrets::cli::ambiguous_vault),
+        help("qualify it with a store, e.g. \"store@vault\", or pass --store")
+    )]
+    AmbiguousVault(String),
+
+    /// A `store@` qualifier, or `--store`, named a store that is not
+    /// configured (ADR-018).
+    #[error("{0}")]
+    #[diagnostic(code(secrets::cli::store_not_found))]
+    StoreNotFound(String),
+
+    /// A daemon-wide operation with no `--store` (ADR-018) has more than
+    /// one candidate store and cannot guess which.
+    #[error("{0}")]
+    #[diagnostic(
+        code(secrets::cli::store_selection_required),
+        help("pass --store <id> to target one store")
+    )]
+    StoreSelectionRequired(String),
+
     /// A command whose structure exists for forward-compatibility, but
     /// whose behaviour is not yet implemented.
     #[error("`secrets {command}` is not implemented yet")]
@@ -126,6 +150,9 @@ impl From<ManagerError> for CliError {
             ManagerError::BackendRequiresAuthentication(message) => {
                 Self::BackendRequiresAuthentication(message)
             }
+            ManagerError::AmbiguousVault(message) => Self::AmbiguousVault(message),
+            ManagerError::StoreNotFound(message) => Self::StoreNotFound(message),
+            ManagerError::StoreSelectionRequired(message) => Self::StoreSelectionRequired(message),
         }
     }
 }

@@ -365,6 +365,7 @@ impl Backend for LocalBackend {
         };
         let Some(vault_data) = file.vaults.get(vault) else {
             return Err(CoreError::NotFound {
+                store: None,
                 vault: vault.to_string(),
                 item: String::new(),
                 field: String::new(),
@@ -392,12 +393,14 @@ impl Backend for LocalBackend {
         let key_guard = self.key.lock().expect("poisoned");
         let Some(key) = key_guard.as_ref() else {
             return Err(CoreError::VaultLocked {
+                store: None,
                 vault: vault.to_string(),
             });
         };
 
         let file_guard = self.file.lock().expect("poisoned");
         let not_found = || CoreError::NotFound {
+            store: None,
             vault: vault.to_string(),
             item: item.to_string(),
             field: field.to_string(),

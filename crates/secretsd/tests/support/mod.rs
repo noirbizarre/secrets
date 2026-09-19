@@ -42,8 +42,17 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use secrets_core::StoreId;
 use secrets_core::dbus::{ManagerError, ManagerProxyBlocking};
 use zbus::zvariant::OwnedObjectPath;
+
+/// The store id every `TestDaemon` started without an explicit
+/// `[store.*]` config uses — matches `secretsd::state::open_registry`'s
+/// implicit zero-config store id (ADR-018).
+#[must_use]
+pub fn default_store_id() -> StoreId {
+    StoreId::new("default").expect("literal \"default\" is always a valid id")
+}
 
 // `gen_async = false` on every trait in `proxies` means the macro names
 // each blocking proxy plainly (`XProxy`, not `XProxyBlocking`) — see
@@ -55,6 +64,15 @@ pub use proxies::{CollectionProxy, ItemProxy, PromptProxy, SecretServiceProxy, S
 /// works on first unlock (see `LocalBackend::unlock`'s own doc comment);
 /// fixed here only so tests that unlock don't each invent their own.
 pub const DEMO_PASSPHRASE: &str = "test passphrase";
+
+/// The passphrase [`TestDaemon::start_with_two_local_stores`] seeds
+/// store `"a"` with (ADR-018) — deliberately distinct from
+/// [`STORE_B_PASSPHRASE`], so a test can confirm each store's own lock
+/// state is independent.
+pub const STORE_A_PASSPHRASE: &str = "a passphrase";
+
+/// See [`STORE_A_PASSPHRASE`] — store `"b"`'s own passphrase.
+pub const STORE_B_PASSPHRASE: &str = "b passphrase";
 
 /// The demo vault's seeded values (see `LocalBackend::seed_demo_vault`) —
 /// duplicated here rather than imported, since `secretsd::backend::local`
@@ -139,6 +157,100 @@ impl TestDaemon {
         Self::start_with(true, None, extra_env)
     }
 
+    /// Two local stores, `"a"` and `"b"` (ADR-018), each with its own
+    /// seeded demo vault file — since `LocalBackend::unlock`'s demo
+    /// seeding always creates the same-named `"Personal"`/
+    /// `"Infrastructure"` vaults (see `LocalBackend::seed_demo_vault`),
+    /// this is a genuine same-name collision across two real stores, not
+    /// a synthetic one, built entirely from `LocalBackend`'s own public
+    /// API. Neither store is unlocked yet — call
+    /// [`TestDaemon::unlock_store`] with [`STORE_A_PASSPHRASE`]/
+    /// [`STORE_B_PASSPHRASE`].
+    ///
+    /// # Panics
+    ///
+    /// If either vault file cannot be seeded, or `secretsd` does not
+    /// become reachable — see [`start`](Self::start).
+    #[must_use]
+    pub fn start_with_two_local_stores() -> Self {
+        let data_dir = tempfile::tempdir().expect("create a temporary XDG_DATA_HOME");
+        let config_dir = tempfile::tempdir().expect("create a temporary XDG_CONFIG_HOME");
+        let runtime_dir = tempfile::tempdir().expect("create a temporary XDG_RUNTIME_DIR");
+        secure_runtime_dir(runtime_dir.path());
+
+        let vault_dir = data_dir.path().join("secrets");
+        std::fs::create_dir_all(&vault_dir).expect("create the vault files' parent directory");
+        secretsd::backend::local::LocalBackend::open(vault_dir.join("a.toml"))
+            .expect("open a fresh vault file for store \"a\"")
+            .unlock(STORE_A_PASSPHRASE)
+            .expect("seed store \"a\"'s demo vault on first unlock");
+        secretsd::backend::local::LocalBackend::open(vault_dir.join("b.toml"))
+            .expect("open a fresh vault file for store \"b\"")
+            .unlock(STORE_B_PASSPHRASE)
+            .expect("seed store \"b\"'s demo vault on first unlock");
+        // Re-lock both — a fresh `secretsd` process starts locked, same as
+        // every other `TestDaemon` constructor; seeding via `unlock` above
+        // only writes the files, it does not need to leave this
+        // short-lived, in-process `LocalBackend` handle unlocked (it is
+        // dropped immediately after anyway, and `secretsd` itself opens
+        // its own fresh handle on startup).
+        let config_subdir = config_dir.path().join("secrets");
+        std::fs::create_dir_all(&config_subdir).expect("create secretsd's own config directory");
+        std::fs::write(
+            config_subdir.join("secretsd.toml"),
+            "[store.a]\ntype = \"local\"\n\n[store.b]\ntype = \"local\"\n",
+        )
+        .expect("write a two-local-store secretsd.toml");
+
+        let bus = PrivateBus::start();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_secretsd"));
+        command
+            .env("XDG_DATA_HOME", data_dir.path())
+            .env("XDG_CONFIG_HOME", config_dir.path())
+            .env("XDG_RUNTIME_DIR", runtime_dir.path())
+            .env("DBUS_SESSION_BUS_ADDRESS", &bus.address)
+            .env("RUST_LOG", "debug")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut daemon = command
+            .spawn()
+            .expect("spawn the secretsd binary under test");
+
+        let output = Arc::new(Mutex::new(String::new()));
+        drain(daemon.stdout.take().expect("stdout was piped"), &output);
+        drain(daemon.stderr.take().expect("stderr was piped"), &output);
+
+        let connection = zbus::blocking::connection::Builder::address(bus.address.as_str())
+            .expect("a dbus-daemon-printed address is always a valid zbus address")
+            .build()
+            .expect("connect to the private session bus as a second, client-side connection");
+
+        let mut harness = Self {
+            _data_dir: data_dir,
+            _config_dir: config_dir,
+            _runtime_dir: runtime_dir,
+            bus,
+            daemon,
+            output,
+            connection,
+        };
+        harness.wait_until_ready();
+        harness
+    }
+
+    /// Unlock one specific store through `org.secrets.Manager`
+    /// (ADR-018).
+    ///
+    /// # Errors
+    ///
+    /// See [`TestDaemon::unlock`].
+    pub fn unlock_store(&self, store: &str, passphrase: &str) -> Result<(), ManagerError> {
+        self.manager()
+            .unlock_store(store, passphrase)
+            .map_err(ManagerError::from)
+    }
+
     /// The shared implementation behind every `start*` constructor above.
     fn start_with(
         seed_vault: bool,
@@ -207,7 +319,7 @@ impl TestDaemon {
             .build()
             .expect("connect to the private session bus as a second, client-side connection");
 
-        let harness = Self {
+        let mut harness = Self {
             _data_dir: data_dir,
             _config_dir: config_dir,
             _runtime_dir: runtime_dir,
@@ -223,13 +335,25 @@ impl TestDaemon {
     /// Block until `secretsd` answers a D-Bus call (`org.secrets.Manager`
     /// is served first, at startup, before the Secret Service topology —
     /// see `main.rs` — so it is the cheapest possible readiness probe).
-    fn wait_until_ready(&self) {
+    ///
+    /// Fails immediately (rather than waiting out the full timeout) once
+    /// the process has already exited — e.g. a config error `main.rs`
+    /// rejects before ever reaching D-Bus setup — since it can only ever
+    /// become *less* likely to become reachable from there, never more.
+    fn wait_until_ready(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if let Ok(proxy) = ManagerProxyBlocking::new(&self.connection)
                 && proxy.status().is_ok()
             {
                 return;
+            }
+            if let Ok(Some(status)) = self.daemon.try_wait() {
+                panic!(
+                    "secretsd exited early ({status}) before becoming reachable on the private \
+                     session bus; captured output:\n{}",
+                    self.captured_output()
+                );
             }
             assert!(
                 Instant::now() < deadline,

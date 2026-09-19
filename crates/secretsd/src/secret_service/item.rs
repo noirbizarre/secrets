@@ -1,4 +1,5 @@
-//! `org.freedesktop.Secret.Item`: one per (vault, item, field) triple.
+//! `org.freedesktop.Secret.Item`: one per (store, vault, item, field)
+//! quadruple (ADR-018).
 //!
 //! Secret Service items hold exactly one secret value each, but a
 //! `secrets-core` item can hold several fields — so each field of a
@@ -8,14 +9,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use secrets_core::ItemPath;
+use secrets_core::{ItemPath, StoreId};
 
 use super::Secret;
 use crate::state::DaemonState;
 
-/// One (vault, item, field) triple.
+/// One (store, vault, item, field) quadruple.
 pub struct ItemIface {
     state: Arc<DaemonState>,
+    store: StoreId,
     vault: String,
     item: ItemPath,
     field: String,
@@ -24,9 +26,16 @@ pub struct ItemIface {
 impl ItemIface {
     /// Wrap one field as a servable Secret Service item.
     #[must_use]
-    pub fn new(state: Arc<DaemonState>, vault: String, item: ItemPath, field: String) -> Self {
+    pub fn new(
+        state: Arc<DaemonState>,
+        store: StoreId,
+        vault: String,
+        item: ItemPath,
+        field: String,
+    ) -> Self {
         Self {
             state,
+            store,
             vault,
             item,
             field,
@@ -36,21 +45,23 @@ impl ItemIface {
 
 #[zbus::interface(name = "org.freedesktop.Secret.Item")]
 impl ItemIface {
-    /// Whether this item is currently readable — reflects both the
-    /// daemon-wide lock and the active backend's own session state (see
+    /// Whether this item is currently readable — reflects both this
+    /// store's own lock and its own session state (see
     /// [`crate::state::DaemonState::is_accessible`]), so a 1Password
     /// session that needs (re)authentication shows as locked here too, not
     /// just through `org.secrets.Manager`.
     #[zbus(property)]
     fn locked(&self) -> bool {
-        !self.state.is_accessible()
+        !self.state.is_accessible(&self.store)
     }
 
-    /// `vault`, `item` and `field`, so `Service`/`Collection.SearchItems`
-    /// have something to match against.
+    /// `store`, `vault`, `item` and `field`, so
+    /// `Service`/`Collection.SearchItems` have something to match
+    /// against.
     #[zbus(property)]
     fn attributes(&self) -> HashMap<String, String> {
         HashMap::from([
+            ("store".to_string(), self.store.to_string()),
             ("vault".to_string(), self.vault.clone()),
             ("item".to_string(), self.item.to_string()),
             ("field".to_string(), self.field.clone()),
@@ -68,12 +79,12 @@ impl ItemIface {
     ///
     /// # Errors
     ///
-    /// Fails while locked, while the active backend's own session needs
+    /// Fails while locked, while this store's own session needs
     /// (re)authentication, or if the value cannot be decrypted.
     fn get_secret(&self, session: zbus::zvariant::OwnedObjectPath) -> zbus::fdo::Result<Secret> {
         let value = self
             .state
-            .read_field(&self.vault, &self.item, &self.field)
+            .read_field(&self.store, &self.vault, &self.item, &self.field)
             .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
         Ok(Secret {
             session,
@@ -106,11 +117,14 @@ mod tests {
     use secrets_core::BackendStatus;
 
     use super::*;
-    use crate::test_support::{state_over_fresh_vault, state_with_backend_session};
+    use crate::test_support::{
+        default_store_id, state_over_fresh_vault, state_with_backend_session,
+    };
 
     fn item_over(state: DaemonState) -> ItemIface {
         ItemIface::new(
             Arc::new(state),
+            default_store_id(),
             "Personal".to_string(),
             ItemPath::new(vec!["GitHub".to_string()]).unwrap(),
             "password".to_string(),
@@ -118,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn locked_reflects_the_daemon_lock_alone_when_the_backend_has_no_session() {
+    fn locked_reflects_the_store_lock_alone_when_the_backend_has_no_session() {
         let (_dir, state) = state_over_fresh_vault();
         let item = item_over(state);
         assert!(item.locked());
@@ -127,7 +141,9 @@ mod tests {
     #[test]
     fn locked_is_false_once_unlocked_with_no_backend_session() {
         let (_dir, state) = state_over_fresh_vault();
-        state.unlock("test passphrase").unwrap();
+        state
+            .unlock(&default_store_id(), "test passphrase")
+            .unwrap();
         let item = item_over(state);
         assert!(!item.locked());
     }
@@ -138,7 +154,9 @@ mod tests {
         // 1Password) must not make `Item.Locked` report `false` while its
         // own session is unmet.
         let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
-        state.unlock("test passphrase").unwrap();
+        state
+            .unlock(&default_store_id(), "test passphrase")
+            .unwrap();
         let item = item_over(state);
         assert!(item.locked());
     }
@@ -146,7 +164,9 @@ mod tests {
     #[test]
     fn get_secret_fails_when_the_backend_session_requires_authentication() {
         let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
-        state.unlock("test passphrase").unwrap();
+        state
+            .unlock(&default_store_id(), "test passphrase")
+            .unwrap();
         let item = item_over(state);
         let session: zbus::zvariant::OwnedObjectPath =
             super::super::SESSION_PATH.try_into().unwrap();
@@ -156,7 +176,9 @@ mod tests {
     #[test]
     fn get_secret_succeeds_when_accessible() {
         let (_dir, state) = state_over_fresh_vault();
-        state.unlock("test passphrase").unwrap();
+        state
+            .unlock(&default_store_id(), "test passphrase")
+            .unwrap();
         let item = item_over(state);
         let session: zbus::zvariant::OwnedObjectPath =
             super::super::SESSION_PATH.try_into().unwrap();

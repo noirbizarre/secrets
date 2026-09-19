@@ -7,28 +7,46 @@
 
 use std::path::PathBuf;
 
+use secrets_core::StoreId;
+
 use crate::error::{DaemonError, Result};
 
-/// The vault file's name within `$XDG_DATA_HOME/secrets/`.
+/// The local backend's file name for the implicit/explicit `"default"`
+/// store, within `$XDG_DATA_HOME/secrets/` — today's only vault file name,
+/// kept fixed so neither a pre-ADR-018 zero-config install nor someone
+/// writing `[store.default] type = "local"` explicitly ever ends up
+/// pointed at a differently-named file.
 const VAULT_FILE_NAME: &str = "vault.toml";
+
+/// The store id [`vault_file`] maps to [`VAULT_FILE_NAME`] rather than
+/// `"<id>.toml"`.
+const DEFAULT_STORE_ID: &str = "default";
 
 /// The SSH agent socket's name within `$XDG_RUNTIME_DIR/secrets/`.
 ///
 /// Namespaced under `secrets/` rather than dropped directly in
 /// `XDG_RUNTIME_DIR`, so it cannot collide with another agent's
 /// `ssh-agent.sock` and is trivially found by anything iterating the
-/// directory.
+/// directory. One socket total, aggregating identities across every
+/// configured store (ADR-018) — the SSH agent protocol has no store
+/// concept and does not need to grow one.
 const SSH_AGENT_SOCKET_NAME: &str = "ssh-agent.sock";
 
-/// Resolve (and create the parent directory for) the vault file path.
+/// Resolve (and create the parent directory for) one local store's vault
+/// file path.
 ///
 /// # Errors
 ///
 /// Returns [`DaemonError::XdgUnavailable`] if `XDG_DATA_HOME` (or its
 /// fallback `~/.local/share`) cannot be determined or created.
-pub fn vault_file() -> Result<PathBuf> {
+pub fn vault_file(store: &StoreId) -> Result<PathBuf> {
     let xdg = xdg::BaseDirectories::with_prefix("secrets");
-    xdg.place_data_file(VAULT_FILE_NAME)
+    let name = if store.as_str() == DEFAULT_STORE_ID {
+        VAULT_FILE_NAME.to_string()
+    } else {
+        format!("{store}.toml")
+    };
+    xdg.place_data_file(name)
         .map_err(|error| DaemonError::XdgUnavailable(error.to_string()))
 }
 
