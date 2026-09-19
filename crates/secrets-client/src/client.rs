@@ -44,29 +44,62 @@ impl SecretsClient<'static> {
 }
 
 impl SecretsClient<'_> {
-    /// `"locked"` or `"unlocked"`.
+    /// `"locked"` or `"unlocked"` — a daemon-wide composite over every
+    /// configured store (ADR-018); see [`SecretsClient::status_store`]
+    /// for one store's own status.
     pub fn status(&self) -> Result<String> {
         map(self.proxy.status())
     }
 
-    /// Unlock the store.
+    /// Unlock the store — a daemon-wide composite (ADR-018): a no-op
+    /// with no real passphrase lock configured, unlocks directly with
+    /// exactly one, and fails with `StoreSelectionRequired` with more
+    /// than one; see [`SecretsClient::unlock_store`] to target a store
+    /// explicitly.
     pub fn unlock(&self, passphrase: &str) -> Result<()> {
         map(self.proxy.unlock(passphrase))
     }
 
-    /// Lock the store.
+    /// Lock the store — a daemon-wide composite (ADR-018): locks every
+    /// configured store; see [`SecretsClient::lock_store`] to target one.
     pub fn lock(&self) -> Result<()> {
         map(self.proxy.lock())
     }
 
-    /// List every vault name.
+    /// List every configured store's vault names, as `"<store>@<vault>"`
+    /// strings (ADR-018) — always store-qualified, even with a single
+    /// configured store.
     pub fn list_vaults(&self) -> Result<Vec<String>> {
         map(self.proxy.list_vaults())
     }
 
-    /// List a vault's item paths.
+    /// List a vault's item paths. `vault` accepts the same optional
+    /// `"<store>@"` prefix as a `secret://` URI's vault segment
+    /// (ADR-018).
     pub fn list_items(&self, vault: &str) -> Result<Vec<String>> {
         map(self.proxy.list_items(vault))
+    }
+
+    /// List every configured store's id (ADR-018).
+    pub fn list_stores(&self) -> Result<Vec<String>> {
+        map(self.proxy.list_stores())
+    }
+
+    /// One store's own session state: `"locked"` or `"unlocked"`
+    /// (ADR-018) — unlike [`SecretsClient::status`], never a composite.
+    pub fn status_store(&self, store: &str) -> Result<String> {
+        map(self.proxy.status_store(store))
+    }
+
+    /// Unlock exactly one store with its master passphrase (ADR-018).
+    pub fn unlock_store(&self, store: &str, passphrase: &str) -> Result<()> {
+        map(self.proxy.unlock_store(store, passphrase))
+    }
+
+    /// Lock exactly one store, dropping any decrypted material from
+    /// memory (ADR-018).
+    pub fn lock_store(&self, store: &str) -> Result<()> {
+        map(self.proxy.lock_store(store))
     }
 
     /// Validate a `secret://` reference without reading its value.

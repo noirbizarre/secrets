@@ -17,6 +17,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use secrets_core::StoreId;
 use zbus::blocking::Connection;
 use zbus::zvariant::OwnedObjectPath;
 
@@ -87,18 +88,19 @@ fn reconcile(
     let old = topology.snapshot();
     let object_server = connection.object_server();
 
-    let old_vaults: HashSet<&String> = old.vaults.iter().collect();
-    let new_vaults: HashSet<&String> = new.vaults.iter().collect();
+    let old_vaults: HashSet<&(StoreId, String)> = old.vaults.iter().collect();
+    let new_vaults: HashSet<&(StoreId, String)> = new.vaults.iter().collect();
 
-    for vault in new
-        .vaults
-        .iter()
-        .filter(|vault| !old_vaults.contains(vault))
-    {
-        let path = collection_path(vault);
+    for (store, vault) in new.vaults.iter().filter(|pair| !old_vaults.contains(pair)) {
+        let path = collection_path(store, vault);
         match object_server.at(
             &path,
-            CollectionIface::new(state.clone(), vault.clone(), topology.clone()),
+            CollectionIface::new(
+                state.clone(),
+                store.clone(),
+                vault.clone(),
+                topology.clone(),
+            ),
         ) {
             Ok(true) => emit(
                 connection,
@@ -110,15 +112,13 @@ fn reconcile(
             // Already registered somehow (e.g. a concurrent reconcile) —
             // nothing changed, so nothing to announce.
             Ok(false) => {}
-            Err(error) => tracing::warn!(vault, %error, "could not register a new Collection"),
+            Err(error) => {
+                tracing::warn!(%store, vault, %error, "could not register a new Collection");
+            }
         }
     }
-    for vault in old
-        .vaults
-        .iter()
-        .filter(|vault| !new_vaults.contains(vault))
-    {
-        let path = collection_path(vault);
+    for (store, vault) in old.vaults.iter().filter(|pair| !new_vaults.contains(pair)) {
+        let path = collection_path(store, vault);
         match object_server.remove::<CollectionIface, _>(&path) {
             Ok(true) => emit(
                 connection,
@@ -128,12 +128,14 @@ fn reconcile(
                 &path,
             ),
             Ok(false) => {}
-            Err(error) => tracing::warn!(vault, %error, "could not remove a vanished Collection"),
+            Err(error) => {
+                tracing::warn!(%store, vault, %error, "could not remove a vanished Collection");
+            }
         }
     }
 
-    // Items: keyed by their (stable, per (vault, item, field) triple)
-    // object path.
+    // Items: keyed by their (stable, per (store, vault, item, field)
+    // quadruple) object path.
     let old_items: HashSet<&OwnedObjectPath> = old.items.iter().map(|known| &known.path).collect();
     let new_items: HashSet<&OwnedObjectPath> = new.items.iter().map(|known| &known.path).collect();
 
@@ -142,11 +144,12 @@ fn reconcile(
         .iter()
         .filter(|known| !old_items.contains(&known.path))
     {
-        let collection = collection_path(&known.vault);
+        let collection = collection_path(&known.store, &known.vault);
         match object_server.at(
             &known.path,
             ItemIface::new(
                 state.clone(),
+                known.store.clone(),
                 known.vault.clone(),
                 known.item.clone(),
                 known.field.clone(),
@@ -161,6 +164,7 @@ fn reconcile(
             ),
             Ok(false) => {}
             Err(error) => tracing::warn!(
+                store = %known.store,
                 vault = known.vault,
                 item = %known.item,
                 field = known.field,
@@ -174,7 +178,7 @@ fn reconcile(
         .iter()
         .filter(|known| !new_items.contains(&known.path))
     {
-        let collection = collection_path(&known.vault);
+        let collection = collection_path(&known.store, &known.vault);
         match object_server.remove::<ItemIface, _>(&known.path) {
             Ok(true) => emit(
                 connection,
@@ -185,6 +189,7 @@ fn reconcile(
             ),
             Ok(false) => {}
             Err(error) => tracing::warn!(
+                store = %known.store,
                 vault = known.vault,
                 item = %known.item,
                 field = known.field,
@@ -200,11 +205,13 @@ fn reconcile(
 }
 
 /// The `"default"` alias's collection is a *duplicate* registration of
-/// whichever vault sorts first (ADR-013 item 2), at its own literal path.
+/// whichever `(store, vault)` pair sorts first (ADR-013 item 2, redefined
+/// by ADR-018 from "the first vault" to "the first `(store, vault)` pair"
+/// over `Topology`'s own deterministic order), at its own literal path.
 /// Because `CollectionIface` reads the shared `LiveTopology` live (not a
 /// construction-time snapshot), it never needs re-registering just because
 /// that vault's *items* changed — only when the *identity* of "the first
-/// vault" itself changes (a vault was added before it alphabetically,
+/// pair" itself changes (a pair was added before it in that order,
 /// removed, or there were none and now there is one, or vice versa).
 fn reconcile_default_alias(
     connection: &Connection,
@@ -218,12 +225,17 @@ fn reconcile_default_alias(
     }
     let object_server = connection.object_server();
     // Ignore "nothing was registered there" — this runs unconditionally
-    // whenever the first vault changes, including from `None`.
+    // whenever the first pair changes, including from `None`.
     let _ = object_server.remove::<CollectionIface, _>(ALIAS_DEFAULT_PATH);
-    if let Some(first) = new.vaults.first()
+    if let Some((store, vault)) = new.vaults.first()
         && let Err(error) = object_server.at(
             ALIAS_DEFAULT_PATH,
-            CollectionIface::new(state.clone(), first.clone(), topology.clone()),
+            CollectionIface::new(
+                state.clone(),
+                store.clone(),
+                vault.clone(),
+                topology.clone(),
+            ),
         )
     {
         tracing::warn!(%error, "could not re-register the \"default\" alias collection");

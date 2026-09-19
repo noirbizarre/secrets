@@ -88,6 +88,7 @@ mod tests {
         fn list_items(&self, vault: &str) -> Result<Vec<Item>> {
             if vault != "Personal" {
                 return Err(CoreError::NotFound {
+                    store: None,
                     vault: vault.to_string(),
                     item: String::new(),
                     field: String::new(),
@@ -107,6 +108,7 @@ mod tests {
                 Ok(SecretValue::new("hunter2".to_string()))
             } else {
                 Err(CoreError::NotFound {
+                    store: None,
                     vault: vault.to_string(),
                     item: item.to_string(),
                     field: field.to_string(),

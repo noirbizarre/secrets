@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. The "cannot run two backends at once" limitation named in this
+ADR's own Consequences is lifted by
+[ADR-018](018-multi-store-support.md); the trait design and roadmap
+described here are otherwise unchanged.
 
 ## Context
 

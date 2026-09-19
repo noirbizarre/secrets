@@ -34,16 +34,20 @@ D-Bus destination explicitly. See
 | Interface                             | Object path(s)                                          |
 | -------------------------------------- | -------------------------------------------------------- |
 | `org.freedesktop.Secret.Service`       | `/org/freedesktop/secrets`                                |
-| `org.freedesktop.Secret.Collection`    | `/org/freedesktop/secrets/collection/<vault-slug>`        |
-| `org.freedesktop.Secret.Item`          | `/org/freedesktop/secrets/collection/<vault-slug>/<slug>` |
+| `org.freedesktop.Secret.Collection`    | `/org/freedesktop/secrets/collection/<store-slug>/<vault-slug>` |
+| `org.freedesktop.Secret.Item`          | `/org/freedesktop/secrets/collection/<store-slug>/<vault-slug>/<slug>` |
 | `org.freedesktop.Secret.Session`       | `/org/freedesktop/secrets/session/shared` (one, shared)   |
 | `org.freedesktop.Secret.Prompt`        | `/org/freedesktop/secrets/prompt/unsupported` (one, shared) |
 | `org.freedesktop.Secret.Collection`    | `/org/freedesktop/secrets/aliases/default` (the `"default"` alias's collection, also reachable at its real path above) |
 
-`<vault-slug>`/`<slug>` are lossy, ASCII-safe encodings of the vault/item/
-field names (see `secretsd::secret_service::slug`) — used only for object
-path stability; a client should read `Label`/`Attributes`, not the path,
-for the actual names.
+`<store-slug>`/`<vault-slug>`/`<slug>` are lossy, ASCII-safe encodings of
+the store/vault/item/field names (see `secretsd::secret_service::slug`) —
+used only for object path stability; a client should read
+`Label`/`Attributes`, not the path, for the actual names. Nesting by store
+(ADR-018) makes two stores that happen to expose a same-named vault
+structurally impossible to collide at the same object path — path
+segments are distinct even when the slugged names alone would not
+guarantee that.
 
 Each `Item` object represents one **(vault, item, field) triple**, not a
 whole `secrets-core` item — the Secret Service spec's "item" holds exactly
@@ -54,26 +58,31 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
 ## What works
 
 - `Service.Collections`, `Collection.Items` — enumerate vaults and items.
-- `Service.SearchItems`, `Collection.SearchItems` — match by `vault`,
-  `item` or `field` attribute (see `Item.Attributes` below).
+- `Service.SearchItems`, `Collection.SearchItems` — match by `store`,
+  `vault`, `item` or `field` attribute (see `Item.Attributes` below).
 - `Item.GetSecret`, `Service.GetSecrets` — read a field's value, subject to
   lock state.
-- `Item.Locked`, `Collection.Locked` — reflect **both** the daemon-wide
-  lock state and the active backend's own session state (see
+- `Item.Locked`, `Collection.Locked` — reflect **both** that item/vault's
+  own store's lock state (ADR-018 — each store locks independently) and
+  that store's own session state (see
   [ADR-011](../adr/011-backend-session-and-authentication-state.md)),
-  live, on every property read. For a backend with no session concept of
-  its own (the local backend), only the daemon lock matters, same as
-  before. For 1Password Desktop, whose "unlock" *is* its own session (see
+  live, on every property read. For a store with no session concept of
+  its own (the local backend), only its own lock matters, same as before.
+  For 1Password Desktop, whose "unlock" *is* its own session (see
   [`docs/backends/1password.md`](../backends/1password.md)), an object
   reports locked whenever that session needs (re)authentication or is
-  unavailable — even though the daemon-wide lock itself is always
-  "unlocked" for that backend. `Service.SearchItems`/`GetSecrets` and the
-  SSH agent follow the same rule.
-- `Item.Attributes` — a synthetic `{"vault": ..., "item": ..., "field":
-  ...}` map (there is no Secret-Service-native concept of a
-  vault/item/field triple to draw richer attributes from).
-- `Service.ReadAlias("default")` — resolves to the first known vault, if
-  any; the same collection is also reachable directly at the literal
+  unavailable — even though that store's own passphrase lock is always
+  "unlocked" for it. `Service.SearchItems`/`GetSecrets` and the SSH agent
+  follow the same rule, judged per matched item's own store — two stores
+  may disagree (one locked, one not) and `SearchItems` reports each
+  match accordingly, not by one shared boolean.
+- `Item.Attributes` — a synthetic `{"store": ..., "vault": ..., "item":
+  ..., "field": ...}` map (there is no Secret-Service-native concept of a
+  store/vault/item/field quadruple to draw richer attributes from).
+- `Service.ReadAlias("default")` — resolves to the first `(store, vault)`
+  pair, in `(StoreId, vault name)` order (ADR-018 redefines ADR-013's
+  "the first vault," singular), if any; the same collection is also
+  reachable directly at the literal
   `/org/freedesktop/secrets/aliases/default` object path (see the
   interfaces table above).
 - **Live topology** (see
@@ -104,9 +113,9 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
 
 ## Interactive prompting (conditional on a registered provider)
 
-`Service.Unlock`, when the daemon's own passphrase lock (not a backend
-session, see ADR-011) is why access is denied, now starts a real request
-through `secretsd`'s prompt broker (see
+`Service.Unlock`, when some configured store's own passphrase lock (not a
+backend session, see ADR-011) is why access is denied, now starts a real
+request through `secretsd`'s prompt broker (see
 [ADR-017](../adr/017-prompt-broker-and-provider-protocol.md) and
 [`prompt-broker.md`](prompt-broker.md)). With a `"unlock"`-capable prompt
 provider registered (a separate, out-of-repo process — e.g. a future

@@ -146,8 +146,14 @@ impl UnlockPrompt {
     /// Attempt the unlock, logging (never the passphrase) on failure.
     /// Returns whether the prompt should report itself dismissed (`true`)
     /// or succeeded (`false`).
+    ///
+    /// Uses the daemon-wide composite ([`DaemonState::unlock_default`]),
+    /// matching [`super::service::ServiceIface::unlock`]'s own composite
+    /// semantics (ADR-018) — this prompt was started without a specific
+    /// store target, so the same "exactly one real lock, or nothing to
+    /// do" resolution applies here too.
     fn try_unlock(&self, passphrase: SecretValue) -> bool {
-        match self.state.unlock(passphrase.expose_secret()) {
+        match self.state.unlock_default(passphrase.expose_secret()) {
             Ok(()) => false,
             Err(error) => {
                 tracing::warn!(

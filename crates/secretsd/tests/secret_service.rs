@@ -22,7 +22,10 @@ use secrets_core::ItemPath;
 use secrets_core::dbus::{STATUS_LOCKED, STATUS_UNLOCKED};
 use secretsd::prompt::broker::PROMPT_TIMEOUT_OVERRIDE_ENV;
 use secretsd::secret_service::{ALIAS_DEFAULT_PATH, SESSION_PATH, collection_path, item_path};
-use support::{DEMO_PASSPHRASE, DEMO_PASSWORD, DEMO_TOTP, DEMO_USERNAME, MockProvider, TestDaemon};
+use support::{
+    DEMO_PASSPHRASE, DEMO_PASSWORD, DEMO_TOTP, DEMO_USERNAME, MockProvider, TestDaemon,
+    default_store_id,
+};
 use zbus::zvariant::{OwnedObjectPath, Value};
 
 /// The demo vault's fixed object paths (see `LocalBackend::seed_demo_vault`
@@ -41,15 +44,16 @@ struct DemoTopology {
 }
 
 fn demo_topology() -> DemoTopology {
+    let store = default_store_id();
     let github = ItemPath::new(vec!["GitHub".to_string()]).unwrap();
     let production = ItemPath::new(vec!["Production".to_string()]).unwrap();
     DemoTopology {
-        personal: collection_path("Personal"),
-        infrastructure: collection_path("Infrastructure"),
-        github_username: item_path("Personal", &github, "username"),
-        github_password: item_path("Personal", &github, "password"),
-        github_totp: item_path("Personal", &github, "totp"),
-        production_ssh_key: item_path("Infrastructure", &production, "ssh-key"),
+        personal: collection_path(&store, "Personal"),
+        infrastructure: collection_path(&store, "Infrastructure"),
+        github_username: item_path(&store, "Personal", &github, "username"),
+        github_password: item_path(&store, "Personal", &github, "password"),
+        github_totp: item_path(&store, "Personal", &github, "totp"),
+        production_ssh_key: item_path(&store, "Infrastructure", &production, "ssh-key"),
     }
 }
 
@@ -149,6 +153,7 @@ fn collections_and_items_are_enumerable_and_stable_while_locked() {
     assert_eq!(
         password_item.attributes().unwrap(),
         HashMap::from([
+            ("store".to_string(), default_store_id().to_string()),
             ("vault".to_string(), "Personal".to_string()),
             ("item".to_string(), "GitHub".to_string()),
             ("field".to_string(), "password".to_string()),

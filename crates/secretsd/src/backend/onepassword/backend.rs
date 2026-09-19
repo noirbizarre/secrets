@@ -203,6 +203,7 @@ fn map_generic_error(error: CallError) -> CoreError {
 /// [`CoreError::BackendUnavailable`] fallback.
 fn map_resolve_error(vault: &str, item: &ItemPath, field: &str, error: CallError) -> CoreError {
     let not_found = || CoreError::NotFound {
+        store: None,
         vault: vault.to_string(),
         item: item.to_string(),
         field: field.to_string(),
@@ -260,6 +261,7 @@ impl Backend for OnePasswordBackend {
     fn list_items(&self, vault: &str) -> CoreResult<Vec<Item>> {
         let vault_id = self.vault_id(vault).map_err(|error| match error {
             CallError::VaultNotFound => CoreError::NotFound {
+                store: None,
                 vault: vault.to_string(),
                 item: String::new(),
                 field: String::new(),

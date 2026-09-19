@@ -1,8 +1,10 @@
-//! `org.freedesktop.Secret.Collection`: one per vault.
+//! `org.freedesktop.Secret.Collection`: one per (store, vault) pair
+//! (ADR-018).
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use secrets_core::StoreId;
 use zbus::zvariant::OwnedObjectPath;
 
 use super::LiveTopology;
@@ -11,6 +13,7 @@ use crate::state::DaemonState;
 /// One vault, exposed as a Secret Service collection.
 pub struct CollectionIface {
     state: Arc<DaemonState>,
+    store: StoreId,
     vault: String,
     /// Shared with `ServiceIface` and every other `CollectionIface` — see
     /// [`LiveTopology`]. This vault's own items are filtered out of a
@@ -20,12 +23,18 @@ pub struct CollectionIface {
 }
 
 impl CollectionIface {
-    /// Wrap a vault's name and the shared, live topology handle as a
-    /// servable collection.
+    /// Wrap a store id, a vault's name and the shared, live topology
+    /// handle as a servable collection.
     #[must_use]
-    pub fn new(state: Arc<DaemonState>, vault: String, topology: LiveTopology) -> Self {
+    pub fn new(
+        state: Arc<DaemonState>,
+        store: StoreId,
+        vault: String,
+        topology: LiveTopology,
+    ) -> Self {
         Self {
             state,
+            store,
             vault,
             topology,
         }
@@ -41,7 +50,7 @@ impl CollectionIface {
             .snapshot()
             .items
             .iter()
-            .filter(|known| known.vault == self.vault)
+            .filter(|known| known.store == self.store && known.vault == self.vault)
             .map(|known| known.path.clone())
             .collect()
     }
@@ -52,12 +61,14 @@ impl CollectionIface {
         self.vault.clone()
     }
 
-    /// Whether this vault is currently readable — reflects both the
-    /// daemon-wide lock and the active backend's own session state; see
-    /// [`crate::state::DaemonState::is_accessible`].
+    /// Whether this vault is currently readable — reflects both this
+    /// store's own lock and its own session state; see
+    /// [`crate::state::DaemonState::is_accessible`]. A different store
+    /// may report differently (ADR-018 supersedes ADR-009's "daemon-wide,
+    /// not per-vault" framing on this point).
     #[zbus(property)]
     fn locked(&self) -> bool {
-        !self.state.is_accessible()
+        !self.state.is_accessible(&self.store)
     }
 
     /// Search this vault's items by attribute.
@@ -67,8 +78,10 @@ impl CollectionIface {
             .items
             .iter()
             .filter(|known| {
-                known.vault == self.vault
+                known.store == self.store
+                    && known.vault == self.vault
                     && attributes.iter().all(|(key, value)| match key.as_str() {
+                        "store" => known.store.as_str() == value,
                         "vault" => &known.vault == value,
                         "item" => known.item.to_string() == *value,
                         "field" => &known.field == value,

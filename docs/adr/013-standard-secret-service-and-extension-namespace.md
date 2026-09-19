@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. The `"default"` alias and object-path scheme described here are
+extended by [ADR-018](018-multi-store-support.md) to a store-nested
+topology; every other decision (bus name request policy, standard-vs-
+extension framing) stands.
 
 ## Context
 

@@ -21,38 +21,78 @@ Defined once in `secrets_core::dbus` (via `#[zbus::proxy]`, generating both
 `secretsd::manager::ManagerIface` — client and server share the exact same
 declaration, so they cannot drift apart.
 
+Every method below that names a store (`Status`/`Unlock`/`Lock`) is a
+daemon-wide **composite** over every configured store (ADR-018) — a
+client that only ever configures one store observes no behavior change
+at all. The `*Store` methods target exactly one store explicitly.
+
 ## Methods
 
 ### `Status() -> String`
 
 Returns `"locked"` or `"unlocked"`
-(`secrets_core::dbus::{STATUS_LOCKED, STATUS_UNLOCKED}`). Never fails.
+(`secrets_core::dbus::{STATUS_LOCKED, STATUS_UNLOCKED}`) — `"unlocked"`
+iff every configured store with a real passphrase lock reports unlocked
+(vacuously true if none has one). Never fails. See `StatusStore` for one
+store's own status.
 
 ### `Unlock(passphrase: String)`
 
-Unlocks the store. On the very first call ever made against a fresh
-installation (no vault file exists yet), this call *creates* the vault,
-using `passphrase` as its new master passphrase, seeded with a small demo
-vault — see [`docs/security.md`](../security.md) for why and its limits.
+Unlocks the store with a real passphrase lock. A no-op if none is
+configured; unlocks it directly if exactly one is; fails with
+`StoreSelectionRequired`, naming every candidate, if more than one is —
+this never guesses which store `passphrase` belongs to. On the very first
+call ever made against a fresh installation (no vault file exists yet for
+that store), this call *creates* the vault, using `passphrase` as its new
+master passphrase, seeded with a small demo vault — see
+[`docs/security.md`](../security.md) for why and its limits.
 
 Fails with `PermissionDenied` if a vault already exists and the passphrase
-does not match it.
+does not match it. See `UnlockStore` to target one store explicitly.
 
 ### `Lock()`
 
-Locks the store, dropping the derived key from memory. Never fails.
+Locks every configured store, dropping any derived key from memory. Never
+fails. See `LockStore` to target one store explicitly.
 
 ### `ListVaults() -> Vec<String>`
 
-Every vault name the active backend exposes. Available regardless of lock
-state — vault names are not secret material.
+Every configured store's vault names, as `"<store>@<vault>"` strings
+(ADR-018) — always store-qualified, even with a single configured store,
+so this method's own output is always ready to paste into a `secret://`
+reference or `ListItems`. Available regardless of lock state — vault
+names are not secret material.
 
 ### `ListItems(vault: String) -> Vec<String>`
 
 Item paths within `vault` (e.g. `"GitHub"`, `"Production/database"`),
 formatted the same way they appear in a `secret://` URI's item segment.
-Available regardless of lock state. Fails with `NotFound` if `vault` does
-not exist.
+`vault` accepts the same optional `"<store>@"` prefix as a `secret://`
+URI's vault segment (see [`docs/secret-uri.md`](../secret-uri.md#store-qualification));
+unqualified, it resolves via the same rule: a name found in exactly one
+store still resolves silently, in more than one fails with
+`AmbiguousVault`. Available regardless of lock state. Fails with
+`NotFound` if `vault` does not exist in any configured store.
+
+### `ListStores() -> Vec<String>`
+
+Every configured store's id (ADR-018).
+
+### `StatusStore(store: String) -> String`
+
+One store's own `"locked"`/`"unlocked"` status — unlike `Status`, never a
+composite. Fails with `StoreNotFound` if `store` is not configured, or
+`InvalidUri` if it does not parse as a valid store id.
+
+### `UnlockStore(store: String, passphrase: String)`
+
+Unlocks exactly `store` with its own master passphrase. Same first-run
+seeding and `PermissionDenied` behavior as `Unlock`, scoped to that one
+store. Fails with `StoreNotFound`/`InvalidUri` as above.
+
+### `LockStore(store: String)`
+
+Locks exactly `store`. Fails with `StoreNotFound`/`InvalidUri` as above.
 
 ### `Resolve(uri: String) -> String`
 
@@ -120,6 +160,9 @@ parsing a message string:
 | `org.secrets.Error.InvalidOperation`     | The operation does not make sense here    |
 | `org.secrets.Error.BackendUnavailable`   | The backend could not be reached          |
 | `org.secrets.Error.BackendRequiresAuthentication` | The backend has its own unmet session/auth requirement (see ADR-011) |
+| `org.secrets.Error.AmbiguousVault`       | An unqualified vault name exists in more than one configured store (ADR-018) |
+| `org.secrets.Error.StoreNotFound`        | A `store@` qualifier or `store` argument named a store that is not configured (ADR-018) |
+| `org.secrets.Error.StoreSelectionRequired` | A daemon-wide `Unlock` has more than one candidate store and cannot guess which (ADR-018) |
 
 None of these ever include a secret's value in their message — see
 [`docs/security.md`](../security.md).

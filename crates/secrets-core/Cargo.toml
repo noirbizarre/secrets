@@ -36,3 +36,4 @@ zeroize = { version = "1.9.0", features = ["derive"] }
 [dev-dependencies]
 pretty_assertions = "1.4.1"
 rstest = "0.26.1"
+toml = "1.1.4"

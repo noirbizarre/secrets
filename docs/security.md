@@ -46,8 +46,10 @@ claims to close.
 
 ## What is actually encrypted
 
-The MVP's one backend (a local file, `$XDG_DATA_HOME/secrets/vault.toml`)
-encrypts **field values only**, not vault/item/field names:
+Each local store (a local file, `$XDG_DATA_HOME/secrets/<id>.toml` —
+`vault.toml` for the default/zero-config store, see
+[ADR-018](adr/018-multi-store-support.md)) encrypts **field values only**,
+not vault/item/field names:
 
 - **Key derivation:** Argon2id (the `argon2` crate's defaults — 19 MiB, 2
   passes, 1 lane), from the passphrase supplied to `secrets unlock`.

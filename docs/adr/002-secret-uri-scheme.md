@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Extended by [ADR-018](018-multi-store-support.md)'s optional,
+userinfo-style `store@` qualifier; every other decision here stands.
 
 ## Context
 

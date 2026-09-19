@@ -30,8 +30,18 @@ pub struct Cli {
 pub enum Command {
     /// List vaults, or the items within one.
     List {
-        /// The vault to list items from. Omit to list vault names instead.
+        /// The vault to list items from. Omit to list vault names
+        /// instead. Accepts the same optional `"<store>@"` prefix as a
+        /// `secret://` reference (ADR-018) — `--store` is only
+        /// meaningful in the no-`vault` (vault-listing) mode below.
         vault: Option<String>,
+
+        /// Only list vaults from this store, and print them unqualified
+        /// (ADR-018). Ignored when `vault` is given — that argument's
+        /// own optional `"<store>@"` prefix already selects a store, if
+        /// any.
+        #[arg(long)]
+        store: Option<String>,
 
         /// Print as a JSON object instead of one name per line.
         #[arg(long)]
@@ -92,15 +102,42 @@ pub enum Command {
         json: bool,
     },
 
-    /// Lock the store.
-    Lock,
+    /// Lock the store, or one specific store with `--store`.
+    Lock {
+        /// Lock only this store (ADR-018). Omit to lock every configured
+        /// store.
+        #[arg(long)]
+        store: Option<String>,
+    },
 
-    /// Unlock the store, prompting for the passphrase interactively.
-    Unlock,
+    /// Unlock the store, or one specific store with `--store`, prompting
+    /// for the passphrase interactively.
+    Unlock {
+        /// Unlock only this store (ADR-018). Omit for the daemon-wide
+        /// composite: a no-op with no real passphrase lock configured,
+        /// direct with exactly one, and an actionable error naming every
+        /// candidate with more than one.
+        #[arg(long)]
+        store: Option<String>,
+    },
 
-    /// Show whether the store is locked or unlocked.
+    /// Show whether the store is locked or unlocked, or one specific
+    /// store's own status with `--store`.
     Status {
+        /// Show only this store's own status (ADR-018). Omit for the
+        /// daemon-wide composite.
+        #[arg(long)]
+        store: Option<String>,
+
         /// Print as a JSON object instead of a bare line.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// List every configured store and whether it is locked (ADR-018).
+    Stores {
+        /// Print as a JSON array instead of one `<id>: <status>` line
+        /// per store.
         #[arg(long)]
         json: bool,
     },

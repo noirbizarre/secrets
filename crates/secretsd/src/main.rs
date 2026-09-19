@@ -40,7 +40,7 @@ fn run() -> Result<(), DaemonError> {
         )
         .init();
 
-    let state = Arc::new(state::open_default_state()?);
+    let state = Arc::new(state::open_registry()?);
 
     // The Secret Service compatibility layer's object topology is *live*
     // (ADR-015), not fixed at startup: it starts empty here and is

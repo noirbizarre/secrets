@@ -89,15 +89,36 @@ pub struct FieldDisplay {
 pub trait Manager {
     /// Current session state: `"locked"` or `"unlocked"`
     /// ([`STATUS_LOCKED`] / [`STATUS_UNLOCKED`]).
+    ///
+    /// A daemon-wide composite over every configured store with a real
+    /// passphrase lock (ADR-018): `"unlocked"` iff every one of them
+    /// reports unlocked, vacuously true if none has a real lock at all.
+    /// See [`ManagerProxyBlocking::status_store`] for one store's own
+    /// status.
     fn status(&self) -> zbus::Result<String>;
 
     /// Unlock the store with the master passphrase.
+    ///
+    /// A daemon-wide composite (ADR-018): a no-op if no configured store
+    /// has a real passphrase lock, unlocks it directly if exactly one
+    /// does, and fails with `org.secrets.Error.StoreSelectionRequired` if
+    /// more than one does — see [`ManagerProxyBlocking::unlock_store`] to
+    /// target one store explicitly.
     fn unlock(&self, passphrase: &str) -> zbus::Result<()>;
 
     /// Lock the store, dropping any decrypted material from memory.
+    ///
+    /// A daemon-wide composite (ADR-018): locks every configured store
+    /// unconditionally, including ones with no real lock of their own
+    /// (a harmless no-op for those). See
+    /// [`ManagerProxyBlocking::lock_store`] to target one store.
     fn lock(&self) -> zbus::Result<()>;
 
-    /// List the names of every vault the active backend exposes.
+    /// List the names of every vault every configured store exposes, as
+    /// `"<store>@<vault>"` strings (ADR-018) — always qualified, even
+    /// when only one store is configured, so this method's output is
+    /// always a valid `store@` prefix for [`ManagerProxyBlocking::
+    /// list_items`] or a `secret://` reference.
     ///
     /// Available while locked: vault names are not secret material.
     fn list_vaults(&self) -> zbus::Result<Vec<String>>;
@@ -106,8 +127,29 @@ pub trait Manager {
     /// `"Production/database"`), joined the same way they appear in a
     /// `secret://` URI's item segment.
     ///
+    /// `vault` accepts the same optional `"<store>@"` prefix as a
+    /// `secret://` URI's vault segment (ADR-018): unqualified resolves
+    /// via the same ambiguity rule as [`crate::uri::SecretUri`] (exactly
+    /// one match resolves silently; more than one fails with
+    /// `org.secrets.Error.AmbiguousVault`).
+    ///
     /// Available while locked: item paths are not secret material.
     fn list_items(&self, vault: &str) -> zbus::Result<Vec<String>>;
+
+    /// List every configured store's id (ADR-018).
+    fn list_stores(&self) -> zbus::Result<Vec<String>>;
+
+    /// One store's own session state: `"locked"` or `"unlocked"`
+    /// (ADR-018) — unlike [`ManagerProxyBlocking::status`], never a
+    /// composite.
+    fn status_store(&self, store: &str) -> zbus::Result<String>;
+
+    /// Unlock exactly one store with its master passphrase (ADR-018).
+    fn unlock_store(&self, store: &str, passphrase: &str) -> zbus::Result<()>;
+
+    /// Lock exactly one store, dropping any decrypted material from
+    /// memory (ADR-018).
+    fn lock_store(&self, store: &str) -> zbus::Result<()>;
 
     /// Validate and canonicalise a `secret://` reference, confirming the
     /// vault, item and field exist, without returning the field's value.
@@ -176,6 +218,20 @@ pub enum ManagerError {
     /// (see [`crate::backend::BackendSession`]) and it is missing,
     /// expired, or otherwise unsatisfied.
     BackendRequiresAuthentication(String),
+
+    /// An unqualified vault name (ADR-018) exists in more than one
+    /// configured store; the message names every candidate.
+    AmbiguousVault(String),
+
+    /// A `store@` qualifier, or an explicit store argument, named a
+    /// store that is not configured (ADR-018).
+    StoreNotFound(String),
+
+    /// A daemon-wide operation with no store argument (ADR-018) has more
+    /// than one candidate store and cannot guess which; the message
+    /// names every candidate and the caller should use the store-scoped
+    /// method instead.
+    StoreSelectionRequired(String),
 }
 
 impl From<CoreError> for ManagerError {
@@ -195,6 +251,9 @@ impl From<CoreError> for ManagerError {
             CoreError::BackendRequiresAuthentication(_) => {
                 Self::BackendRequiresAuthentication(message)
             }
+            CoreError::AmbiguousVault { .. } => Self::AmbiguousVault(message),
+            CoreError::StoreNotFound { .. } => Self::StoreNotFound(message),
+            CoreError::StoreSelectionRequired { .. } => Self::StoreSelectionRequired(message),
         }
     }
 }
@@ -365,6 +424,7 @@ mod tests {
         // Regression guard: mapping must preserve the message, not just the
         // discriminant, so a client's error report is still actionable.
         let error = CoreError::NotFound {
+            store: None,
             vault: "Personal".to_string(),
             item: "GitHub".to_string(),
             field: "password".to_string(),
@@ -381,6 +441,7 @@ mod tests {
         // treat "no such item" the same as "no such field on an item
         // that does exist".
         let error = CoreError::ItemNotFound {
+            store: None,
             vault: "Personal".to_string(),
             item: "GitHub".to_string(),
         };
@@ -408,6 +469,43 @@ mod tests {
         assert!(matches!(
             mapped,
             ManagerError::BackendRequiresAuthentication(msg) if msg.contains("1Password")
+        ));
+    }
+
+    #[test]
+    fn an_ambiguous_vault_maps_to_its_own_dbus_error() {
+        let error = CoreError::AmbiguousVault {
+            vault: "Personal".to_string(),
+            candidates: vec![
+                crate::store_id::StoreId::new("work").unwrap(),
+                crate::store_id::StoreId::new("home").unwrap(),
+            ],
+        };
+        let mapped: ManagerError = error.into();
+        assert!(matches!(mapped, ManagerError::AmbiguousVault(msg) if msg.contains("work")));
+    }
+
+    #[test]
+    fn a_store_not_found_maps_to_its_own_dbus_error() {
+        let error = CoreError::StoreNotFound {
+            store: crate::store_id::StoreId::new("ghost").unwrap(),
+        };
+        let mapped: ManagerError = error.into();
+        assert!(matches!(mapped, ManagerError::StoreNotFound(msg) if msg.contains("ghost")));
+    }
+
+    #[test]
+    fn a_store_selection_requirement_maps_to_its_own_dbus_error() {
+        let error = CoreError::StoreSelectionRequired {
+            candidates: vec![
+                crate::store_id::StoreId::new("work").unwrap(),
+                crate::store_id::StoreId::new("home").unwrap(),
+            ],
+        };
+        let mapped: ManagerError = error.into();
+        assert!(matches!(
+            mapped,
+            ManagerError::StoreSelectionRequired(msg) if msg.contains("work") && msg.contains("home")
         ));
     }
 

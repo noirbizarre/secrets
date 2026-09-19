@@ -20,7 +20,8 @@ use std::io::IsTerminal;
 use cli::Command;
 use error::{CliError, Result};
 use output::{
-    GetMode, GetPayload, ItemsPayload, ResolvePayload, ShowPayload, StatusPayload, VaultsPayload,
+    GetMode, GetPayload, ItemsPayload, ResolvePayload, ShowPayload, StatusPayload, StoreStatus,
+    StoresPayload, VaultsPayload,
 };
 use secrets_client::SecretsClient as Client;
 
@@ -33,27 +34,53 @@ use secrets_client::SecretsClient as Client;
 /// commands (`inject`, `run`, `totp`).
 pub fn run(command: Command) -> Result<()> {
     match command {
-        Command::Status { json } => {
+        Command::Status { store, json } => {
             let client = Client::connect()?;
-            let status = client.status()?;
+            let status = match &store {
+                Some(store) => client.status_store(store)?,
+                None => client.status()?,
+            };
             if json {
                 print_json(&StatusPayload { status: &status });
             } else {
                 println!("{status}");
             }
         }
-        Command::Unlock => {
+        Command::Unlock { store } => {
             let client = Client::connect()?;
             let passphrase = prompt_passphrase()?;
-            client.unlock(&passphrase)?;
+            match &store {
+                Some(store) => client.unlock_store(store, &passphrase)?,
+                None => client.unlock(&passphrase)?,
+            }
             println!("unlocked");
         }
-        Command::Lock => {
+        Command::Lock { store } => {
             let client = Client::connect()?;
-            client.lock()?;
+            match &store {
+                Some(store) => client.lock_store(store)?,
+                None => client.lock()?,
+            }
             println!("locked");
         }
-        Command::List { vault, json } => {
+        Command::Stores { json } => {
+            let client = Client::connect()?;
+            let mut ids = client.list_stores()?;
+            ids.sort();
+            let mut stores = Vec::with_capacity(ids.len());
+            for id in ids {
+                let status = client.status_store(&id)?;
+                stores.push(StoreStatus { id, status });
+            }
+            if json {
+                print_json(&StoresPayload { stores });
+            } else {
+                for store in &stores {
+                    println!("{}: {}", store.id, store.status);
+                }
+            }
+        }
+        Command::List { vault, store, json } => {
             let client = Client::connect()?;
             match vault {
                 Some(vault) => {
@@ -71,6 +98,23 @@ pub fn run(command: Command) -> Result<()> {
                 }
                 None => {
                     let vaults = client.list_vaults()?;
+                    // Every store's vaults come back store-qualified
+                    // (ADR-018); `--store` filters to one and strips the
+                    // prefix back off, entirely client-side — no
+                    // dedicated proxy method needed since `list_vaults`
+                    // already returns everything.
+                    let vaults: Vec<String> = match &store {
+                        Some(store) => {
+                            let prefix = format!("{store}@");
+                            vaults
+                                .into_iter()
+                                .filter_map(|qualified| {
+                                    qualified.strip_prefix(prefix.as_str()).map(str::to_string)
+                                })
+                                .collect()
+                        }
+                        None => vaults,
+                    };
                     if json {
                         print_json(&VaultsPayload { vaults: &vaults });
                     } else {

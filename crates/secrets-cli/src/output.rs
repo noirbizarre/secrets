@@ -64,8 +64,26 @@ pub struct StatusPayload<'a> {
 /// `list --json`'s shape when listing vault names.
 #[derive(Serialize)]
 pub struct VaultsPayload<'a> {
-    /// Every vault name the active backend exposes.
+    /// Every configured store's vault names — `"<store>@<vault>"`
+    /// strings (ADR-018) with no `--store` filter, bare vault names when
+    /// `--store` was given (already filtered/unqualified client-side).
     pub vaults: &'a [String],
+}
+
+/// `stores --json`'s shape.
+#[derive(Serialize)]
+pub struct StoresPayload {
+    /// Every configured store's id and current lock status.
+    pub stores: Vec<StoreStatus>,
+}
+
+/// One store's id and status, within [`StoresPayload`].
+#[derive(Serialize)]
+pub struct StoreStatus {
+    /// The store's id.
+    pub id: String,
+    /// `"locked"` or `"unlocked"`.
+    pub status: String,
 }
 
 /// `list <vault> --json`'s shape when listing a vault's item paths.

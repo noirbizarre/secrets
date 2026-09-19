@@ -40,10 +40,11 @@ impl ServiceIface {
     }
 }
 
-/// Items (across every vault) whose synthetic attributes are a superset of
-/// `attributes` — see the module doc for what attributes exist (`vault`,
-/// `item`, `field`). A free function, not a method, since it only ever
-/// needs a `Topology` snapshot already taken by its caller, not `&self`.
+/// Items (across every store and vault) whose synthetic attributes are a
+/// superset of `attributes` — see the module doc for what attributes
+/// exist (`store`, `vault`, `item`, `field`). A free function, not a
+/// method, since it only ever needs a `Topology` snapshot already taken
+/// by its caller, not `&self`.
 fn matching_items<'t>(
     topology: &'t Topology,
     attributes: &HashMap<String, String>,
@@ -53,6 +54,7 @@ fn matching_items<'t>(
         .iter()
         .filter(|known| {
             attributes.iter().all(|(key, value)| match key.as_str() {
+                "store" => known.store.as_str() == value,
                 "vault" => &known.vault == value,
                 "item" => known.item.to_string() == *value,
                 "field" => &known.field == value,
@@ -64,14 +66,15 @@ fn matching_items<'t>(
 
 #[zbus::interface(name = "org.freedesktop.Secret.Service")]
 impl ServiceIface {
-    /// Every vault, as its `Collection` object path.
+    /// Every (store, vault) pair, as its `Collection` object path
+    /// (ADR-018).
     #[zbus(property)]
     fn collections(&self) -> Vec<OwnedObjectPath> {
         self.topology
             .snapshot()
             .vaults
             .iter()
-            .map(|name| collection_path(name))
+            .map(|(store, vault)| collection_path(store, vault))
             .collect()
     }
 
@@ -107,55 +110,66 @@ impl ServiceIface {
     }
 
     /// Search every known item for one matching every given attribute.
+    ///
+    /// Each matched item's locked-state is judged against its *own*
+    /// store (ADR-018) — reflects both that store's lock and its own
+    /// session state (see `DaemonState::is_accessible`) — not a single
+    /// shared boolean, since two stores may now disagree about
+    /// accessibility (one locked, another unlocked, or one 1Password
+    /// session needing (re)authentication while a local store next to it
+    /// is fully open).
     fn search_items(
         &self,
         attributes: HashMap<String, String>,
     ) -> (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) {
-        // Reflects both the daemon-wide lock and the active backend's own
-        // session state (see `DaemonState::is_accessible`) — not just the
-        // daemon lock, so a 1Password session needing (re)authentication
-        // reports matches as locked here too.
-        let accessible_now = self.state.is_accessible();
         let topology = self.topology.snapshot();
-        let matches: Vec<OwnedObjectPath> = matching_items(&topology, &attributes)
-            .into_iter()
-            .map(|known| known.path.clone())
-            .collect();
-        if accessible_now {
-            (matches, Vec::new())
-        } else {
-            (Vec::new(), matches)
+        let mut unlocked = Vec::new();
+        let mut locked = Vec::new();
+        for known in matching_items(&topology, &attributes) {
+            if self.state.is_accessible(&known.store) {
+                unlocked.push(known.path.clone());
+            } else {
+                locked.push(known.path.clone());
+            }
         }
+        (unlocked, locked)
     }
 
-    /// Reflects the daemon-wide lock *and* backend session state for the
-    /// given objects. When the daemon's own passphrase lock is why access
-    /// is denied, this starts a real request through the shared
-    /// [`UnlockPrompt`] (see ADR-017) — if a `"unlock"`-capable provider
-    /// is registered, calling `Prompt.Prompt` on the returned object can
-    /// now genuinely unlock the store. A backend session needing
-    /// reauthorization (1Password) is not something this broker can fix
-    /// — that still needs the backend's own app (see
-    /// `docs/backends/1password.md`); the shared prompt object is
-    /// returned unchanged for spec-compliant discoverability in that
-    /// case, exactly like the original MVP behaviour.
+    /// Reflects every configured store's lock *and* backend session state
+    /// (ADR-018 composite, mirroring `Manager.Unlock`'s own — see
+    /// [`DaemonState::status_summary`]/[`DaemonState::unlock_default`]).
+    /// When some store's own passphrase lock is why access is denied,
+    /// this starts a real request through the shared [`UnlockPrompt`]
+    /// (see ADR-017) — if a `"unlock"`-capable provider is registered,
+    /// calling `Prompt.Prompt` on the returned object can now genuinely
+    /// unlock it. A backend session needing reauthorization (1Password)
+    /// is not something this broker can fix — that still needs the
+    /// backend's own app (see `docs/backends/1password.md`); the shared
+    /// prompt object is returned unchanged for spec-compliant
+    /// discoverability in that case, exactly like the original MVP
+    /// behaviour.
     fn unlock(&self, objects: Vec<OwnedObjectPath>) -> (Vec<OwnedObjectPath>, OwnedObjectPath) {
         let prompt: OwnedObjectPath = PROMPT_PATH.try_into().expect("valid object path");
-        if self.state.is_accessible() {
+        let all_accessible = self
+            .state
+            .store_ids()
+            .all(|id| self.state.is_accessible(id));
+        if all_accessible {
             (objects, "/".try_into().expect("valid object path"))
         } else {
-            if !self.state.is_unlocked() {
+            if self.state.status_summary() == secrets_core::dbus::STATUS_LOCKED {
                 self.unlock_prompt.begin();
             }
             (Vec::new(), prompt)
         }
     }
 
-    /// Locks the whole daemon (there is no per-collection locking in the
-    /// MVP's single-passphrase model), regardless of which objects were
+    /// Locks every configured store (there is no per-collection locking
+    /// in the MVP's single-passphrase-per-store model — see
+    /// [`DaemonState::lock_all`]), regardless of which objects were
     /// named.
     fn lock(&self, objects: Vec<OwnedObjectPath>) -> (Vec<OwnedObjectPath>, OwnedObjectPath) {
-        self.state.lock();
+        self.state.lock_all();
         (objects, "/".try_into().expect("valid object path"))
     }
 
@@ -177,7 +191,7 @@ impl ServiceIface {
             };
             let value = self
                 .state
-                .read_field(&known.vault, &known.item, &known.field)
+                .read_field(&known.store, &known.vault, &known.item, &known.field)
                 .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
             secrets.insert(
                 item_object_path,
@@ -192,13 +206,15 @@ impl ServiceIface {
         Ok(secrets)
     }
 
-    /// Resolves the well-known `"default"` alias to the first vault, if
-    /// any. No other aliases are recognised in the MVP.
+    /// Resolves the well-known `"default"` alias to the first `(store,
+    /// vault)` pair in `Topology`'s deterministic order (ADR-018 redefines
+    /// ADR-013's "the first vault", singular), if any. No other aliases
+    /// are recognised in the MVP.
     fn read_alias(&self, name: &str) -> OwnedObjectPath {
         if name == "default"
-            && let Some(first) = self.topology.snapshot().vaults.first()
+            && let Some((store, vault)) = self.topology.snapshot().vaults.first()
         {
-            return collection_path(first);
+            return collection_path(store, vault);
         }
         "/".try_into().expect("valid object path")
     }
@@ -217,14 +233,18 @@ mod tests {
     use secrets_core::{BackendStatus, ItemPath};
 
     use super::*;
-    use crate::test_support::{state_over_fresh_vault, state_with_backend_session};
+    use crate::test_support::{
+        default_store_id, state_over_fresh_vault, state_with_backend_session,
+    };
 
     fn topology_over_github_password() -> Topology {
+        let store = default_store_id();
         let item = ItemPath::new(vec!["GitHub".to_string()]).unwrap();
-        let path = super::super::item_path("Personal", &item, "password");
+        let path = super::super::item_path(&store, "Personal", &item, "password");
         Topology {
-            vaults: vec!["Personal".to_string()],
+            vaults: vec![(store.clone(), "Personal".to_string())],
             items: vec![super::super::KnownItem {
+                store,
                 vault: "Personal".to_string(),
                 item,
                 field: "password".to_string(),
@@ -250,7 +270,9 @@ mod tests {
         // 1Password) must still show `SearchItems` matches as locked when
         // its own session is unmet.
         let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
-        state.unlock("test passphrase").unwrap();
+        state
+            .unlock(&default_store_id(), "test passphrase")
+            .unwrap();
         let service = service_over(state);
 
         let (unlocked, locked) = service.search_items(HashMap::from([(
@@ -264,7 +286,9 @@ mod tests {
     #[test]
     fn search_items_reports_matches_as_unlocked_when_accessible() {
         let (_dir, state) = state_over_fresh_vault();
-        state.unlock("test passphrase").unwrap();
+        state
+            .unlock(&default_store_id(), "test passphrase")
+            .unwrap();
         let service = service_over(state);
 
         let (unlocked, locked) = service.search_items(HashMap::from([(
@@ -278,7 +302,9 @@ mod tests {
     #[test]
     fn get_secrets_fails_when_the_backend_session_requires_authentication() {
         let (_dir, state) = state_with_backend_session(BackendStatus::RequiresAuthentication);
-        state.unlock("test passphrase").unwrap();
+        state
+            .unlock(&default_store_id(), "test passphrase")
+            .unwrap();
         let service = service_over(state);
         let topology = topology_over_github_password();
         let session: OwnedObjectPath = SESSION_PATH.try_into().unwrap();
@@ -290,7 +316,9 @@ mod tests {
     #[test]
     fn get_secrets_succeeds_when_accessible() {
         let (_dir, state) = state_over_fresh_vault();
-        state.unlock("test passphrase").unwrap();
+        state
+            .unlock(&default_store_id(), "test passphrase")
+            .unwrap();
         let service = service_over(state);
         let topology = topology_over_github_password();
         let session: OwnedObjectPath = SESSION_PATH.try_into().unwrap();

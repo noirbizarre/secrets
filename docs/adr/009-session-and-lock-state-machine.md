@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Accepted. Superseded in part by
+[ADR-018](018-multi-store-support.md): locking is no longer a single
+daemon-wide boolean, but N per-store instances of exactly this same
+two-state machine, composed by `DaemonState` into the same daemon-wide
+operations for backward compatibility — the state machine itself, and its
+one-authority principle, stand.
 
 ## Context
 

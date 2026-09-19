@@ -2119,6 +2119,7 @@ dependencies = [
  "rstest",
  "serde",
  "thiserror",
+ "toml",
  "zbus",
  "zeroize",
 ]

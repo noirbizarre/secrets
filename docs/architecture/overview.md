@@ -61,28 +61,35 @@ flowchart TB
 ## Layers
 
 1. **`secret://` URI** (`secrets-core::uri`) — parses and validates a
-   reference into `vault`, `item` (one or more path segments) and `field`.
-   Reused by every crate; never reimplemented per client.
+   reference into an optional `store` qualifier, `vault`, `item` (one or
+   more path segments) and `field` — see
+   [ADR-018](../adr/018-multi-store-support.md). Reused by every crate;
+   never reimplemented per client.
 2. **Resolver** (`secrets-core::resolver`) — turns a parsed `SecretUri`
-   into a value via a `Backend`. Knows nothing about D-Bus, locking, or
-   sessions.
+   into a value via a `Backend`. Knows nothing about D-Bus, locking,
+   sessions, or store identity — a `Backend` implementation never learns
+   which store it was configured as (ADR-018).
 3. **Backend** (`secrets-core::backend`) — the contract a storage
    implementation satisfies: `list_vaults`, `list_items`, `get_field`.
    Deliberately small and read-only; see
    [ADR-008](../adr/008-backend-abstraction-and-roadmap.md). A second,
    optional trait, `BackendSession`, lets a backend report its own
-   authentication/session state, distinct from `DaemonState`'s daemon-wide
+   authentication/session state, distinct from `DaemonState`'s per-store
    lock — see [ADR-011](../adr/011-backend-session-and-authentication-state.md).
    Two implementations exist: the local encrypted file, and 1Password
    Desktop's native IPC channel (not the `op` CLI) — see
    [ADR-012](../adr/012-1password-desktop-backend.md),
    [1password-integration.md](1password-integration.md) and
    [1password-poc-results.md](1password-poc-results.md) for the
-   investigation and validation behind it.
-4. **`secretsd`** — the daemon. Owns `DaemonState` (session/lock — see
-   [ADR-009](../adr/009-session-and-lock-state-machine.md)),
-   configuration-selected backend (`[backend] type = "local" |
-   "1password"` — see [config.rs](../../crates/secretsd/src/config.rs)),
+   investigation and validation behind it. Either can be configured more
+   than once, as separate named *stores* (ADR-018) — a store is one
+   configured backend instance, which may itself expose several named
+   vaults.
+4. **`secretsd`** — the daemon. Owns `DaemonState`, a registry of every
+   configured store, each with its own session/lock (ADR-009, extended by
+   [ADR-018](../adr/018-multi-store-support.md) to per-store); a keyed
+   collection of backend instances (`[store.<id>] type = "local" |
+   "1password"` — see [config.rs](../../crates/secretsd/src/config.rs));
    and three protocol surfaces: the standard Secret Service interfaces
    ([ADR-004](../adr/004-secret-service-compatibility-scope.md)), the
    `org.secrets.*` extension namespace

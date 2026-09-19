@@ -46,13 +46,18 @@ working unmodified, not for `secrets` itself to use.
 
 | Command                         | Interface             | Method                        |
 | -------------------------------- | ---------------------- | ------------------------------ |
-| `secrets status`                 | `org.secrets.Manager`  | `Status`                       |
-| `secrets unlock`                 | `org.secrets.Manager`  | `Unlock`                       |
-| `secrets lock`                   | `org.secrets.Manager`  | `Lock`                         |
+| `secrets status` / `--store`     | `org.secrets.Manager`  | `Status` / `StatusStore`       |
+| `secrets unlock` / `--store`     | `org.secrets.Manager`  | `Unlock` / `UnlockStore`       |
+| `secrets lock` / `--store`       | `org.secrets.Manager`  | `Lock` / `LockStore`           |
+| `secrets stores`                 | `org.secrets.Manager`  | `ListStores` / `StatusStore`   |
 | `secrets list`                   | `org.secrets.Manager`  | `ListVaults` / `ListItems`     |
 | `secrets resolve`                | `org.secrets.Manager`  | `Resolve`                      |
 | `secrets get`                    | `org.secrets.Manager`  | `Get`                          |
 | `secrets show`                   | `org.secrets.Manager`  | `ShowItem`                     |
+
+`--store <id>` and the `*Store` methods (ADR-018) target one configured
+store explicitly; the plain commands compose over every store — see
+[`secrets-manager.md`](secrets-manager.md).
 
 See [ADR-014](../adr/014-cli-secret-disclosure-modes.md) for what `secrets
 get` does with the value once it has it (default/`--raw`/`--json`/

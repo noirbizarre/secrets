@@ -37,6 +37,7 @@ pub mod model;
 pub mod prompt;
 pub mod resolver;
 pub mod secret_value;
+pub mod store_id;
 pub mod uri;
 
 pub use backend::{Backend, BackendSession, BackendStatus};
@@ -45,4 +46,5 @@ pub use model::{FieldKind, FieldMeta, Item, Vault};
 pub use prompt::{PromptAnswer, PromptKind, PromptOutcome};
 pub use resolver::Resolver;
 pub use secret_value::SecretValue;
+pub use store_id::{StoreId, StoreIdError};
 pub use uri::{ItemPath, ItemUri, SecretUri, UriError};
