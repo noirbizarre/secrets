@@ -17,6 +17,7 @@ pub mod crypto;
 pub mod error;
 pub mod manager;
 pub mod paths;
+pub mod prompt;
 pub mod secret_service;
 pub mod ssh_agent;
 pub mod state;

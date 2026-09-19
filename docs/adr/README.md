@@ -49,3 +49,5 @@ by editing the old one. The history is the value.
   topology (supersedes ADR-004's "fixed at startup" framing)
 - [ADR-016](016-show-command-and-field-value-obfuscation.md) — `secrets
   show` and field-value obfuscation by kind
+- [ADR-017](017-prompt-broker-and-provider-protocol.md) — The prompt
+  broker and provider protocol

@@ -20,6 +20,30 @@ Any process running as the same user can reach `secretsd` — there is no
 per-application access control in the MVP (see "Not implemented yet"
 below).
 
+### Prompt providers: a new, inbound trust direction
+
+Every interface described above treats `secretsd` as the trusted party and
+the caller as merely unprivileged-but-harmless. The prompt broker
+(`org.secrets.PromptBroker1`/`PromptProvider1`/`PromptRequest1`, see
+[ADR-017](adr/017-prompt-broker-and-provider-protocol.md) and
+[`docs/dbus/prompt-broker.md`](dbus/prompt-broker.md)) is the first
+exception: `secretsd` acts on what a registered provider *tells it* a
+human did — "the user typed this passphrase," "the user approved this" —
+with no independent way to verify it.
+
+In this MVP, any process running as the same user can register as a
+provider; there is no authentication beyond the session bus's own
+kernel-UID check, the same boundary every other interface already relies
+on. This grants no capability a same-user process did not already have: a
+malicious process could already call `org.secrets.Manager.Unlock` directly
+with any passphrase it likes, so answering someone else's unlock prompt
+with an attacker-chosen passphrase achieves nothing a direct call could
+not. A provider *could* still observe or discard a real passphrase the
+user typed for a *different* purpose, if the user was confused about which
+window they were typing into — a UX/social-engineering risk this document
+records as a limitation, not one this protocol's authentication model
+claims to close.
+
 ## What is actually encrypted
 
 The MVP's one backend (a local file, `$XDG_DATA_HOME/secrets/vault.toml`)
@@ -78,10 +102,13 @@ its password is.
 
 - **No per-application access control.** Any local process running as the
   same user can call `org.secrets.Manager` or read via the Secret Service
-  compatibility layer while unlocked. A future prompt-based confirmation
-  (via a future UI client such as GD Secrets, see
-  [`docs/architecture/external-clients.md`](architecture/external-clients.md))
-  is the intended fix — not present yet.
+  compatibility layer while unlocked. The prompt broker (ADR-017) now
+  provides the *mechanism* a future confirmation policy needs — a request
+  for a human's explicit approval, answered by a registered provider — but
+  no call site actually gates a read on one yet. Still the intended fix,
+  now partially built rather than entirely absent.
+- **Any same-user process can register as a prompt provider.** See
+  "Prompt providers: a new, inbound trust direction" above.
 - **Daemon-wide locking, not per-vault or per-secret.** Unlocking makes
   every vault readable. See
   [ADR-009](adr/009-session-and-lock-state-machine.md).

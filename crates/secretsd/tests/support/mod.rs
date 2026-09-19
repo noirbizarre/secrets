@@ -27,9 +27,13 @@
 //! the *other* one uses. Silenced crate-wide here rather than
 //! item-by-item, since which items are "unused" depends on which binary
 //! is compiling this module, not on this module itself (same convention
-//! as `crates/secrets-cli/tests/support/mod.rs`).
-#![allow(dead_code)]
+//! as `crates/secrets-cli/tests/support/mod.rs`). `unused_imports` gets
+//! the same treatment, for the same reason — a `pub use` re-export (e.g.
+//! `MockProvider`) that only one consuming binary (`secret_service.rs`)
+//! actually names.
+#![allow(dead_code, unused_imports)]
 
+mod mock_provider;
 mod proxies;
 
 use std::io::{BufRead, BufReader};
@@ -44,6 +48,7 @@ use zbus::zvariant::OwnedObjectPath;
 // `gen_async = false` on every trait in `proxies` means the macro names
 // each blocking proxy plainly (`XProxy`, not `XProxyBlocking`) — see
 // `zbus_macros::proxy`'s own naming rule for why.
+pub use mock_provider::MockProvider;
 pub use proxies::{CollectionProxy, ItemProxy, PromptProxy, SecretServiceProxy, SessionProxy};
 
 /// The passphrase every [`TestDaemon`] seeds its vault with. Any value
@@ -70,10 +75,11 @@ pub struct TestDaemon {
     _data_dir: tempfile::TempDir,
     _config_dir: tempfile::TempDir,
     _runtime_dir: tempfile::TempDir,
-    // Never read by name after `start()` — held only so its `Drop`
-    // (killing the private `dbus-daemon`) runs for as long as this
-    // `TestDaemon` does; see the tempdirs above for the same pattern.
-    _bus: PrivateBus,
+    // Kept alive for its `Drop` (killing the private `dbus-daemon`), same
+    // as the tempdirs above, but also read via `bus_address` — a mock
+    // prompt provider (`mock_provider.rs`) needs its own, second
+    // connection to this same private bus.
+    bus: PrivateBus,
     daemon: Child,
     /// `secretsd`'s combined stdout+stderr, captured continuously by
     /// background threads — see [`captured_output`]'s doc comment on why
@@ -121,6 +127,16 @@ impl TestDaemon {
     #[must_use]
     pub fn start_with_backend_config(config_contents: &str, extra_env: &[(&str, &str)]) -> Self {
         Self::start_with(false, Some(config_contents), extra_env)
+    }
+
+    /// Same as [`start`](Self::start) (seeded demo vault, default local
+    /// backend), but sets `extra_env` on the spawned process — e.g.
+    /// `secretsd::prompt::broker::PROMPT_TIMEOUT_OVERRIDE_ENV`, to shrink
+    /// an otherwise real-world-scale timeout so a test exercising it
+    /// stays fast.
+    #[must_use]
+    pub fn start_with_env(extra_env: &[(&str, &str)]) -> Self {
+        Self::start_with(true, None, extra_env)
     }
 
     /// The shared implementation behind every `start*` constructor above.
@@ -195,7 +211,7 @@ impl TestDaemon {
             _data_dir: data_dir,
             _config_dir: config_dir,
             _runtime_dir: runtime_dir,
-            _bus: bus,
+            bus,
             daemon,
             output,
             connection,
@@ -357,6 +373,26 @@ impl TestDaemon {
     pub fn prompt(&self) -> PromptProxy<'_> {
         PromptProxy::new(&self.connection)
             .expect("construct a Prompt proxy over an already-open connection")
+    }
+
+    /// A proxy for `org.secrets.PromptBroker1` — the interface a prompt
+    /// provider registers itself against (see ADR-017). Exposed for
+    /// tests that exercise registration edge cases directly, in addition
+    /// to [`MockProvider`], which wraps the common case.
+    #[must_use]
+    pub fn prompt_broker(&self) -> secrets_core::dbus::PromptBroker1ProxyBlocking<'_> {
+        secrets_core::dbus::PromptBroker1ProxyBlocking::new(&self.connection)
+            .expect("construct a PromptBroker1 proxy over an already-open connection")
+    }
+
+    /// The private session bus's own address — a [`MockProvider`] needs
+    /// its own, second connection to the same bus this harness's own
+    /// `connection` is on, so `secretsd` sees it as a distinct D-Bus
+    /// peer with its own unique connection name (a real prompt provider
+    /// is always a separate process).
+    #[must_use]
+    pub fn bus_address(&self) -> &str {
+        &self.bus.address
     }
 
     /// Terminate `secretsd` and assert it exited promptly — the issue's

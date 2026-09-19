@@ -60,6 +60,16 @@ This file is plain markdown, not rendered by `rust.tpl`.
       contract; `org.secrets.Manager` is documented as the `org.secrets.*`
       extension namespace for `secret://`-shaped operations the standard
       cannot express — not a replacement API (see ADR-013, §3.11)
+- [x] 2.11 `docs/dbus/prompt-broker.md` — the prompt broker/provider
+      protocol (`org.secrets.PromptBroker1`/`PromptProvider1`/
+      `PromptRequest1`); updates to `docs/dbus/README.md`,
+      `docs/dbus/secret-service.md` (conditional interactive prompting),
+      `docs/architecture/overview.md` and
+      `docs/architecture/external-clients.md` (prompt providers as a new
+      external-peer category) and `docs/security.md` (the new inbound
+      trust direction a provider represents) — see
+      [ADR-017](docs/adr/017-prompt-broker-and-provider-protocol.md),
+      issue #21
 
 ## 3. Architecture Decision Records (`docs/adr/`)
 
@@ -126,6 +136,13 @@ This file is plain markdown, not rendered by `rust.tpl`.
       `FieldDisplay` wire type + `OBFUSCATED_FIELD_PLACEHOLDER` constant
       — for `Manager.ShowItem` (`uri.rs`, `model.rs`, `dbus.rs`; see
       [ADR-016](docs/adr/016-show-command-and-field-value-obfuscation.md))
+- [x] 4.9 `secrets_core::prompt` — toolkit-independent `PromptKind`/
+      `PromptAnswer`/`PromptOutcome`; `secrets_core::dbus`'s
+      `PromptBroker1`/`PromptProvider1`/`PromptRequest1` proxy traits and
+      `PromptError` — the prompt broker/provider protocol's shared,
+      wire-level contract (see
+      [ADR-017](docs/adr/017-prompt-broker-and-provider-protocol.md),
+      issue #21)
 
 ## 5. `secretsd` (daemon)
 
@@ -161,6 +178,17 @@ This file is plain markdown, not rendered by `rust.tpl`.
       `ItemDeleted` signals (`secret_service/refresh.rs`); supersedes
       ADR-004's "fixed at startup" framing — see
       [ADR-015](docs/adr/015-live-secret-service-topology.md)
+- [x] 5.11 `secretsd::prompt` — the `PromptBroker`, provider registry,
+      `org.secrets.PromptBroker1`/`PromptRequest1` interface
+      implementations, and the `NameOwnerChanged`-based provider-vanish
+      watcher; `secret_service::prompt::UnlockPrompt` adapts
+      `org.freedesktop.Secret.Prompt`'s `Service.Unlock` flow to it — a
+      registered `"unlock"`-capable provider can now genuinely unlock the
+      daemon's own passphrase lock, with no provider registered behaving
+      exactly as the original MVP stub (`prompt.rs`, `service.rs`,
+      `main.rs`). See
+      [ADR-017](docs/adr/017-prompt-broker-and-provider-protocol.md),
+      issue #21
 
 ## 6. `secrets-cli`
 
@@ -246,6 +274,17 @@ This file is plain markdown, not rendered by `rust.tpl`.
       `CARGO_BIN_EXE_secretsd` (only set for tests in `secretsd`'s own
       package — see `tests/support/mod.rs`'s module doc).
 - [x] 9.6 "no secret in error/log" regression tests — see §8.2
+- [x] 9.7 Prompt broker/provider protocol tests — in-process registry
+      unit tests (`secretsd::prompt::broker`), and an in-repo,
+      D-Bus-speaking mock provider
+      (`crates/secretsd/tests/support/mock_provider.rs`, not a real
+      provider implementation) driving `crates/secretsd/tests/
+      secret_service.rs` through the real wire protocol: a correct
+      passphrase relay, a decline, a vanished provider mid-prompt, a
+      timeout (via the test-only `SECRETS_PROMPT_TIMEOUT_MS` override,
+      see `secretsd::prompt::broker::PROMPT_TIMEOUT_OVERRIDE_ENV`), and
+      the no-provider-registered path staying identical to the original
+      MVP stub
 
 ## 10. CI / Release
 

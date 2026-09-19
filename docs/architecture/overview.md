@@ -18,6 +18,7 @@ flowchart TB
         gtk["GD Secrets"]
         tui[secrets-tui]
         browser[browser extensions]
+        provider["prompt provider<br/>(e.g. secrets-prompt-gtk)"]
     end
 
     client[[secrets-client]]
@@ -26,6 +27,7 @@ flowchart TB
         direction TB
         ss["org.freedesktop.Secret.*\n(standard contract)"]
         manager["org.secrets.Manager\n(extensions)"]
+        broker["PromptBroker\n(org.secrets.PromptBroker1)"]
         agent[SSH agent socket]
         state[DaemonState\nlock/session]
         resolver["Resolver<br/>(secrets-core)"]
@@ -46,12 +48,14 @@ flowchart TB
 
     manager --> state
     ss --> state
+    ss -. Prompt() .-> broker
     agent --> state
     state --> resolver
     resolver --> backend
     backend --> local
     backend --> onepassword
     backend -. not yet .-> future
+    broker <-. org.secrets.PromptProvider1 .-> provider
 ```
 
 ## Layers
@@ -85,13 +89,22 @@ flowchart TB
    ([ADR-005](../adr/005-native-manager-api-design.md)), and the SSH agent
    ([ADR-007](../adr/007-ssh-agent-implementation.md)). See
    [ADR-013](../adr/013-standard-secret-service-and-extension-namespace.md)
-   for how the first two relate.
+   for how the first two relate. A toolkit-independent `PromptBroker`
+   (`org.secrets.PromptBroker1`/`PromptProvider1`/`PromptRequest1`) lets an
+   external, desktop-specific prompt provider answer interactive prompts
+   (today: the Secret Service `Prompt` interface's unlock flow) without
+   `secretsd` depending on any UI toolkit itself — see
+   [ADR-017](../adr/017-prompt-broker-and-provider-protocol.md) and
+   [`docs/dbus/prompt-broker.md`](../dbus/prompt-broker.md).
 5. **Clients** — `secrets-cli` today, via `secrets-client`
    ([ADR-010](../adr/010-cli-as-thin-dbus-client.md)); GD Secrets,
    `secrets-tui` and browser native messaging hosts in the future, each a
    separate repository (see [external-clients.md](external-clients.md));
    any Secret-Service-speaking application (`secret-tool`, `libsecret`
-   consumers) today, read-only.
+   consumers) today, read-only. A **prompt provider** (e.g. a future
+   `secrets-prompt-gtk`) is a different kind of external peer — it answers
+   `secretsd`'s own prompts rather than requesting secrets — see
+   [`docs/dbus/prompt-broker.md`](../dbus/prompt-broker.md).
 
 ## Crates
 
