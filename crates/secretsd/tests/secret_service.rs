@@ -19,8 +19,10 @@ mod support;
 use std::collections::{HashMap, HashSet};
 
 use secrets_core::ItemPath;
+use secrets_core::dbus::{STATUS_LOCKED, STATUS_UNLOCKED};
+use secretsd::prompt::broker::PROMPT_TIMEOUT_OVERRIDE_ENV;
 use secretsd::secret_service::{ALIAS_DEFAULT_PATH, SESSION_PATH, collection_path, item_path};
-use support::{DEMO_PASSPHRASE, DEMO_PASSWORD, DEMO_TOTP, DEMO_USERNAME, TestDaemon};
+use support::{DEMO_PASSPHRASE, DEMO_PASSWORD, DEMO_TOTP, DEMO_USERNAME, MockProvider, TestDaemon};
 use zbus::zvariant::{OwnedObjectPath, Value};
 
 /// The demo vault's fixed object paths (see `LocalBackend::seed_demo_vault`
@@ -496,4 +498,206 @@ fn secretsd_shuts_down_promptly_on_sigterm() {
     daemon.unlock(DEMO_PASSPHRASE).unwrap();
 
     daemon.assert_shuts_down_cleanly();
+}
+
+// Prompt broker / provider protocol (ADR-017, issue #21). Every test
+// below starts a `TestDaemon` deliberately left locked (`start()` seeds
+// the demo vault's *file* but never calls the spawned daemon's own
+// `unlock` — see `state.rs`'s own `a_fresh_state_reports_locked_before_
+// unlocking` test for why that leaves it locked in memory), so
+// `Service.Unlock` reaches the "daemon's own passphrase lock is the
+// blocker" branch that starts a real prompt (see
+// `secret_service::prompt::UnlockPrompt::begin`).
+
+#[test]
+fn unlocking_through_a_registered_provider_relays_the_passphrase_and_completes() {
+    let daemon = TestDaemon::start();
+    let provider = MockProvider::register(daemon.bus_address(), &["unlock"], 0);
+
+    // Subscribe before calling `Prompt()`, so the signal — emitted from
+    // whichever thread resolves the request, not synchronously from this
+    // call — cannot arrive before this iterator exists to catch it (same
+    // reasoning as `prompting_immediately_reports_itself_dismissed`).
+    let mut completed = daemon
+        .prompt()
+        .receive_completed()
+        .expect("subscribe to Completed");
+
+    let (unlocked, _prompt) = daemon
+        .service()
+        .unlock(vec![])
+        .expect("Service.Unlock never fails");
+    assert!(
+        unlocked.is_empty(),
+        "still locked at the moment Unlock is called"
+    );
+
+    daemon
+        .prompt()
+        .prompt("")
+        .expect("Prompt() never fails, provider or not");
+
+    let request = provider.wait_for_request();
+    assert_eq!(request.kind().unwrap(), "unlock");
+    request
+        .respond(Value::from(DEMO_PASSPHRASE))
+        .expect("respond with the correct passphrase");
+
+    let signal = completed
+        .next()
+        .expect("Completed is emitted once the provider answers");
+    let args = signal.args().expect("Completed's arguments always decode");
+    assert!(
+        !*args.dismissed(),
+        "a correct passphrase must report success, not dismissed"
+    );
+    assert_eq!(
+        daemon.manager().status().unwrap(),
+        STATUS_UNLOCKED,
+        "the passphrase must actually have unlocked the daemon, not just dismissed the prompt"
+    );
+
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn declining_the_unlock_prompt_leaves_the_daemon_locked() {
+    let daemon = TestDaemon::start();
+    let provider = MockProvider::register(daemon.bus_address(), &["unlock"], 0);
+    let mut completed = daemon
+        .prompt()
+        .receive_completed()
+        .expect("subscribe to Completed");
+
+    daemon
+        .service()
+        .unlock(vec![])
+        .expect("Service.Unlock never fails");
+    daemon.prompt().prompt("").expect("Prompt() never fails");
+
+    provider
+        .wait_for_request()
+        .decline()
+        .expect("decline the request");
+
+    let signal = completed
+        .next()
+        .expect("Completed is emitted once the provider declines");
+    assert!(*signal.args().unwrap().dismissed());
+    assert_eq!(daemon.manager().status().unwrap(), STATUS_LOCKED);
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn a_vanished_provider_mid_prompt_reports_dismissed_deterministically() {
+    let daemon = TestDaemon::start();
+    let provider = MockProvider::register(daemon.bus_address(), &["unlock"], 0);
+    let mut completed = daemon
+        .prompt()
+        .receive_completed()
+        .expect("subscribe to Completed");
+
+    daemon
+        .service()
+        .unlock(vec![])
+        .expect("Service.Unlock never fails");
+    daemon.prompt().prompt("").expect("Prompt() never fails");
+
+    // The provider is notified, then disappears without ever answering —
+    // `secretsd::prompt::watcher` must detect the connection closing and
+    // resolve the request deterministically rather than leaving it
+    // pending forever. The request proxy itself borrows `provider`'s
+    // connection, so it must be dropped before `vanish` can consume it.
+    drop(provider.wait_for_request());
+    provider.vanish();
+
+    let signal = completed
+        .next()
+        .expect("Completed is emitted once the vanished provider is detected");
+    assert!(*signal.args().unwrap().dismissed());
+    assert_eq!(daemon.manager().status().unwrap(), STATUS_LOCKED);
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn an_unanswered_unlock_prompt_times_out_and_reports_dismissed() {
+    // `PROMPT_TIMEOUT_OVERRIDE_ENV` shrinks the otherwise real-world-scale
+    // timeout so this test stays fast — a real deployment never sets it.
+    let daemon = TestDaemon::start_with_env(&[(PROMPT_TIMEOUT_OVERRIDE_ENV, "300")]);
+    let provider = MockProvider::register(daemon.bus_address(), &["unlock"], 0);
+    let mut completed = daemon
+        .prompt()
+        .receive_completed()
+        .expect("subscribe to Completed");
+
+    daemon
+        .service()
+        .unlock(vec![])
+        .expect("Service.Unlock never fails");
+    daemon.prompt().prompt("").expect("Prompt() never fails");
+
+    // The provider is notified and simply never responds.
+    let _request = provider.wait_for_request();
+
+    let signal = completed
+        .next()
+        .expect("Completed is emitted once the shortened timeout elapses");
+    assert!(*signal.args().unwrap().dismissed());
+    assert_eq!(daemon.manager().status().unwrap(), STATUS_LOCKED);
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn unlocking_with_no_registered_provider_still_behaves_like_the_original_mvp() {
+    // Regression guard for ADR-017's "a headless secretsd remains
+    // functional" acceptance criterion: with no provider registered at
+    // all, `Service.Unlock` followed by `Prompt.Prompt` must still
+    // dismiss immediately, exactly like before this feature existed.
+    let daemon = TestDaemon::start();
+    let mut completed = daemon
+        .prompt()
+        .receive_completed()
+        .expect("subscribe to Completed");
+
+    let (unlocked, _prompt) = daemon
+        .service()
+        .unlock(vec![])
+        .expect("Service.Unlock never fails");
+    assert!(unlocked.is_empty());
+
+    daemon.prompt().prompt("").expect("Prompt() never fails");
+
+    let signal = completed
+        .next()
+        .expect("Completed is always emitted, immediately, with no provider registered");
+    assert!(*signal.args().unwrap().dismissed());
+    assert_eq!(daemon.manager().status().unwrap(), STATUS_LOCKED);
+    daemon.assert_no_secrets_leaked();
+}
+
+#[test]
+fn a_provider_can_register_and_unregister_explicitly() {
+    let daemon = TestDaemon::start();
+    let provider = MockProvider::register(daemon.bus_address(), &["unlock"], 0);
+    // Explicit unregistration, not a vanish — verifies
+    // `org.secrets.PromptBroker1.UnregisterProvider` itself works, over
+    // the real wire, distinctly from the "connection closed" path the
+    // vanish test above covers.
+    provider.unregister();
+
+    // With no provider registered anymore, a fresh Unlock/Prompt pair
+    // must fall back to the original, immediately-dismissed behaviour.
+    let mut completed = daemon
+        .prompt()
+        .receive_completed()
+        .expect("subscribe to Completed");
+    daemon
+        .service()
+        .unlock(vec![])
+        .expect("Service.Unlock never fails");
+    daemon.prompt().prompt("").expect("Prompt() never fails");
+    let signal = completed.next().expect("Completed is emitted immediately");
+    assert!(*signal.args().unwrap().dismissed());
+
+    daemon.assert_no_secrets_leaked();
 }

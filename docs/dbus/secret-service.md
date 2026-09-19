@@ -101,12 +101,27 @@ appears as three `Item` objects, labelled `"<item> (<field>)"`.
 - **The encrypted session algorithm.** `OpenSession` only accepts
   `"plain"`; `"dh-ietf1024-sha256-aes128-cbc-pkcs7"` is rejected with
   `NotSupported`. See ADR-004 for why.
-- **Interactive prompting.** The shared `Prompt` object immediately
-  reports itself dismissed when `Prompt()` is called — there is no GUI
-  agent yet (that is a future UI client's job, e.g. GD Secrets; see
-  [`docs/architecture/external-clients.md`](../architecture/external-clients.md)).
-  `Service.Unlock` therefore only reflects state `secrets unlock` already
-  set; it cannot itself trigger a passphrase prompt.
+
+## Interactive prompting (conditional on a registered provider)
+
+`Service.Unlock`, when the daemon's own passphrase lock (not a backend
+session, see ADR-011) is why access is denied, now starts a real request
+through `secretsd`'s prompt broker (see
+[ADR-017](../adr/017-prompt-broker-and-provider-protocol.md) and
+[`prompt-broker.md`](prompt-broker.md)). With a `"unlock"`-capable prompt
+provider registered (a separate, out-of-repo process — e.g. a future
+`secrets-prompt-gtk`; see
+[`docs/architecture/external-clients.md`](../architecture/external-clients.md)),
+calling `Prompt.Prompt(window_id)` on the returned shared `Prompt` object
+can now genuinely unlock the store: the provider shows UI, collects a
+passphrase, and answers over the prompt broker protocol; `Completed`
+reports `dismissed = false` on success. **With no provider registered —
+the default, and the only case this repository itself ships a real
+implementation of — behaviour is unchanged from the original MVP**: the
+shared `Prompt` object dismisses immediately, and `Service.Unlock` only
+ever reflects state `secrets unlock` already set. A backend session's own
+authentication requirement (1Password Desktop) is never resolved through
+this broker either way — that backend's own app owns its UI.
 
 ## Errors
 

@@ -199,6 +199,162 @@ impl From<CoreError> for ManagerError {
     }
 }
 
+/// The object path `secretsd` serves [`PromptBroker1`] at — fixed and
+/// well-known, like [`MANAGER_PATH`].
+pub const PROMPT_BROKER_PATH: &str = "/org/secrets/PromptBroker";
+
+/// The interface name providers call to register/unregister themselves.
+pub const PROMPT_BROKER_INTERFACE: &str = "org.secrets.PromptBroker1";
+
+/// The interface name `secretsd` calls on a registered provider to hand
+/// it a new request.
+pub const PROMPT_PROVIDER_INTERFACE: &str = "org.secrets.PromptProvider1";
+
+/// The interface name of each per-request object `secretsd` creates while
+/// a prompt is pending (see [`PROMPT_REQUEST_PATH_PREFIX`]).
+pub const PROMPT_REQUEST_INTERFACE: &str = "org.secrets.PromptRequest1";
+
+/// The object path prefix every [`PromptRequest1`] object is registered
+/// under — `secretsd` appends a per-request numeric id
+/// (`{PROMPT_REQUEST_PATH_PREFIX}/<id>`).
+pub const PROMPT_REQUEST_PATH_PREFIX: &str = "/org/secrets/PromptBroker/Request";
+
+/// The provider protocol's version, returned by
+/// [`PromptBroker1Proxy::register_provider`]. Bumped (with a new,
+/// distinctly named interface — `PromptBroker2`, and so on) on any
+/// breaking change, rather than assumed additive-forever like
+/// [`Manager`] — see
+/// [ADR-017](../../../docs/adr/017-prompt-broker-and-provider-protocol.md)
+/// for why: unlike `org.secrets.Manager`, a provider is a separate
+/// process this project does not release in lockstep with.
+pub const PROMPT_PROTOCOL_VERSION: u32 = 1;
+
+/// `org.secrets.PromptBroker1`: how an external prompt provider registers
+/// itself with `secretsd`. Implemented by `secretsd`
+/// (`secretsd::prompt::broker_iface`); a provider is the caller here.
+///
+/// A caller's identity comes from the D-Bus message's own sender field
+/// (its unique connection name), never a self-reported argument — a
+/// provider cannot register or unregister on another provider's behalf.
+/// See ADR-017.
+#[zbus::proxy(
+    interface = "org.secrets.PromptBroker1",
+    default_service = "org.secrets.Daemon",
+    default_path = "/org/secrets/PromptBroker"
+)]
+pub trait PromptBroker1 {
+    /// Register as a prompt provider, offering `capabilities` (a subset
+    /// of the [`crate::prompt::kind`] tags) at the given priority (higher
+    /// wins when more than one registered provider supports the same
+    /// kind; ties favour whichever registered first). `object_path` is
+    /// where `secretsd` will call [`PromptProvider1::handle_request`] on
+    /// this same connection.
+    ///
+    /// Returns the broker's [`PROMPT_PROTOCOL_VERSION`] so the caller can
+    /// verify compatibility before relying on any capability.
+    fn register_provider(
+        &self,
+        object_path: zbus::zvariant::ObjectPath<'_>,
+        capabilities: Vec<String>,
+        priority: i32,
+    ) -> zbus::Result<u32>;
+
+    /// Unregister. A no-op if the caller (by its own connection's unique
+    /// name) was never registered.
+    fn unregister_provider(&self) -> zbus::Result<()>;
+}
+
+/// `org.secrets.PromptProvider1`: how `secretsd` hands a registered
+/// provider a new request. Implemented by the provider; `secretsd` is the
+/// caller here.
+///
+/// `request` is a [`PromptRequest1`] object living on `secretsd`'s own
+/// connection — the provider reads its `Kind`/`Title`/`Description`/
+/// `Options` properties, then eventually calls exactly one of
+/// `respond`/`decline`/`cancel` on it. This method itself should return
+/// quickly (e.g. once a window is scheduled to open); it is not expected
+/// to block until the user answers — see ADR-017 on why nothing in this
+/// protocol blocks a caller waiting for human interaction.
+#[zbus::proxy(interface = "org.secrets.PromptProvider1")]
+pub trait PromptProvider1 {
+    /// Handle one new prompt request.
+    fn handle_request(&self, request: zbus::zvariant::ObjectPath<'_>) -> zbus::Result<()>;
+}
+
+/// `org.secrets.PromptRequest1`: one pending prompt. Implemented by
+/// `secretsd`, one object per in-flight request, at
+/// `{PROMPT_REQUEST_PATH_PREFIX}/<id>`; a provider is the caller here.
+/// `secretsd` always owns these objects, so only the per-request `path`
+/// needs to be supplied when building a proxy — the destination defaults
+/// to `secretsd` itself.
+#[zbus::proxy(
+    interface = "org.secrets.PromptRequest1",
+    default_service = "org.secrets.Daemon"
+)]
+pub trait PromptRequest1 {
+    /// The request's kind — one of the [`crate::prompt::kind`] tags.
+    #[zbus(property)]
+    fn kind(&self) -> zbus::Result<String>;
+
+    /// A short, human-readable title.
+    #[zbus(property)]
+    fn title(&self) -> zbus::Result<String>;
+
+    /// A longer, human-readable description.
+    #[zbus(property)]
+    fn description(&self) -> zbus::Result<String>;
+
+    /// The offered options, non-empty only for a `"choice"` request.
+    #[zbus(property)]
+    fn options(&self) -> zbus::Result<Vec<String>>;
+
+    /// Answer the request. `answer`'s shape depends on `Kind`: a string
+    /// passphrase for `"unlock"`, one of `Options` verbatim for
+    /// `"choice"`, or an empty string (ignored) for `"confirmation"`/
+    /// `"security-key"`, which need no payload beyond calling this method
+    /// at all. Fails with `org.secrets.Prompt.Error.RequestNotFound` if
+    /// the request already concluded (answered, timed out, or the daemon
+    /// otherwise resolved it) — this method is not guaranteed to win a
+    /// race against the request's own timeout.
+    fn respond(&self, answer: zbus::zvariant::Value<'_>) -> zbus::Result<()>;
+
+    /// Explicitly decline (e.g. "No" on a confirmation).
+    fn decline(&self) -> zbus::Result<()>;
+
+    /// Dismiss without answering.
+    fn cancel(&self) -> zbus::Result<()>;
+}
+
+/// The `org.secrets.Prompt.Error.*` D-Bus error names — a distinct
+/// namespace from [`ManagerError`]'s `org.secrets.Error.*`, since these
+/// describe failures of an entirely different interface family (the
+/// prompt broker/provider protocol, not `Manager`'s vault operations).
+#[derive(Debug, zbus::DBusError)]
+#[zbus(prefix = "org.secrets.Prompt.Error")]
+pub enum PromptError {
+    /// Wraps a transport-level D-Bus failure.
+    #[zbus(error)]
+    Zbus(zbus::Error),
+
+    /// No provider is registered for the requested kind (or the one
+    /// selected could not be reached in time).
+    NoProviderAvailable(String),
+
+    /// A method was called against a request id that is no longer
+    /// pending — already answered, timed out, cancelled, or the caller's
+    /// provider vanished. Distinct from a transport error: the request
+    /// existed, it just isn't live anymore.
+    RequestNotFound(String),
+
+    /// The answer's shape didn't match the request's kind (e.g. a
+    /// `"choice"` answer that names an option that was never offered).
+    KindMismatch(String),
+
+    /// The caller (by D-Bus unique name) already has a provider
+    /// registered — call `unregister_provider` first to replace it.
+    AlreadyRegistered(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +409,20 @@ mod tests {
             mapped,
             ManagerError::BackendRequiresAuthentication(msg) if msg.contains("1Password")
         ));
+    }
+
+    #[test]
+    fn prompt_error_variants_never_echo_a_secret_shaped_fixture_value() {
+        // `PromptError` is built from names/descriptions only (mirroring
+        // `CoreError`'s own discipline) — never from a `PromptAnswer`.
+        let errors = [
+            PromptError::NoProviderAvailable("no provider for \"unlock\"".to_string()),
+            PromptError::RequestNotFound("request 7 already concluded".to_string()),
+            PromptError::KindMismatch("\"choice\" answer named an unlisted option".to_string()),
+            PromptError::AlreadyRegistered(":1.42 is already registered".to_string()),
+        ];
+        for error in errors {
+            assert!(!error.to_string().contains("hunter2"));
+        }
     }
 }

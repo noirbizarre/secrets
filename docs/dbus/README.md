@@ -16,6 +16,11 @@ every client, present or future, Rust or not, relies on to talk to
   `secret://`-shaped operations the standard interfaces have no way to
   express (`Resolve`/`Get` a `secret://` reference directly,
   single-passphrase `Unlock`/`Status`).
+- [`prompt-broker.md`](prompt-broker.md) — `org.secrets.PromptBroker1`/
+  `PromptProvider1`/`PromptRequest1`, the versioned protocol an external,
+  toolkit-specific prompt provider (a future `secrets-prompt-gtk`, and so
+  on) uses to register with `secretsd` and answer interactive prompts —
+  see [ADR-017](../adr/017-prompt-broker-and-provider-protocol.md).
 - [`ssh-agent.md`](ssh-agent.md) — the standard SSH agent wire protocol
   over its own Unix socket, documented here for completeness even though
   it is deliberately **not** D-Bus (see [ADR-001](../adr/001-dbus-as-the-ipc-mechanism.md)

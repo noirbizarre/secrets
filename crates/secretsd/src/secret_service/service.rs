@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
+use super::prompt::UnlockPrompt;
 use super::{LiveTopology, PROMPT_PATH, SESSION_PATH, Secret, Topology, collection_path};
 use crate::state::DaemonState;
 
@@ -17,14 +18,25 @@ pub struct ServiceIface {
     /// [`LiveTopology::snapshot`] rather than holding the lock for the
     /// call's whole duration.
     topology: LiveTopology,
+    /// Shared with [`super::prompt::PromptIface`] — see
+    /// [`ServiceIface::unlock`].
+    unlock_prompt: Arc<UnlockPrompt>,
 }
 
 impl ServiceIface {
-    /// Wrap daemon state and a shared, live topology handle as the root
-    /// service object.
+    /// Wrap daemon state, a shared, live topology handle, and the shared
+    /// unlock-prompt coordinator as the root service object.
     #[must_use]
-    pub fn new(state: Arc<DaemonState>, topology: LiveTopology) -> Self {
-        Self { state, topology }
+    pub fn new(
+        state: Arc<DaemonState>,
+        topology: LiveTopology,
+        unlock_prompt: Arc<UnlockPrompt>,
+    ) -> Self {
+        Self {
+            state,
+            topology,
+            unlock_prompt,
+        }
     }
 }
 
@@ -117,17 +129,24 @@ impl ServiceIface {
     }
 
     /// Reflects the daemon-wide lock *and* backend session state for the
-    /// given objects. Cannot itself prompt for a passphrase (see
-    /// [`super::prompt`]) — an object that is still locked stays in
-    /// `locked`, with the shared prompt object returned for spec-compliant
-    /// discoverability, not because it can do anything about it. Use
-    /// `secrets unlock` instead (and, for a backend session needing
-    /// reauthorization, its own app — see `docs/backends/1password.md`).
+    /// given objects. When the daemon's own passphrase lock is why access
+    /// is denied, this starts a real request through the shared
+    /// [`UnlockPrompt`] (see ADR-017) — if a `"unlock"`-capable provider
+    /// is registered, calling `Prompt.Prompt` on the returned object can
+    /// now genuinely unlock the store. A backend session needing
+    /// reauthorization (1Password) is not something this broker can fix
+    /// — that still needs the backend's own app (see
+    /// `docs/backends/1password.md`); the shared prompt object is
+    /// returned unchanged for spec-compliant discoverability in that
+    /// case, exactly like the original MVP behaviour.
     fn unlock(&self, objects: Vec<OwnedObjectPath>) -> (Vec<OwnedObjectPath>, OwnedObjectPath) {
         let prompt: OwnedObjectPath = PROMPT_PATH.try_into().expect("valid object path");
         if self.state.is_accessible() {
             (objects, "/".try_into().expect("valid object path"))
         } else {
+            if !self.state.is_unlocked() {
+                self.unlock_prompt.begin();
+            }
             (Vec::new(), prompt)
         }
     }
@@ -215,9 +234,13 @@ mod tests {
     }
 
     fn service_over(state: DaemonState) -> ServiceIface {
+        let state = Arc::new(state);
+        let broker = Arc::new(crate::prompt::PromptBroker::new());
+        let unlock_prompt = Arc::new(UnlockPrompt::new(state.clone(), broker));
         ServiceIface::new(
-            Arc::new(state),
+            state,
             LiveTopology::new(topology_over_github_password()),
+            unlock_prompt,
         )
     }
 

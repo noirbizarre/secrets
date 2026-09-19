@@ -21,14 +21,15 @@
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use secrets_core::dbus::{MANAGER_PATH, SERVICE_NAME};
+use secrets_core::dbus::{MANAGER_PATH, PROMPT_BROKER_PATH, SERVICE_NAME};
 use secretsd::error::DaemonError;
 use secretsd::manager::ManagerIface;
-use secretsd::secret_service::prompt::PromptIface;
+use secretsd::prompt::{PromptBroker, PromptBrokerIface};
+use secretsd::secret_service::prompt::{PromptIface, UnlockPrompt};
 use secretsd::secret_service::service::ServiceIface;
 use secretsd::secret_service::session::SessionIface;
 use secretsd::secret_service::{LiveTopology, PROMPT_PATH, SERVICE_PATH, SESSION_PATH, Topology};
-use secretsd::{paths, secret_service, ssh_agent, state};
+use secretsd::{paths, prompt, secret_service, ssh_agent, state};
 use zbus::fdo::{RequestNameFlags, RequestNameReply};
 
 fn run() -> Result<(), DaemonError> {
@@ -52,6 +53,14 @@ fn run() -> Result<(), DaemonError> {
     let topology = LiveTopology::new(Topology::default());
     let (refresh_trigger_tx, refresh_trigger_rx) = mpsc::channel();
 
+    // The prompt broker (ADR-017) and the Secret Service `Prompt`
+    // interface's unlock coordinator both need to be *servable* before a
+    // real `Connection` exists (see their own doc comments for why) —
+    // constructed here, wired to the real connection with
+    // `set_connection` once `build()` returns below.
+    let broker = Arc::new(PromptBroker::new());
+    let unlock_prompt = Arc::new(UnlockPrompt::new(state.clone(), broker.clone()));
+
     // `org.secrets.Daemon` is the only name this call chain is guaranteed
     // to own — it is exclusively ours, so any failure here is fatal
     // startup error (propagated by `?`, as before).
@@ -62,13 +71,21 @@ fn run() -> Result<(), DaemonError> {
         )?
         .serve_at(
             SERVICE_PATH,
-            ServiceIface::new(state.clone(), topology.clone()),
+            ServiceIface::new(state.clone(), topology.clone(), unlock_prompt.clone()),
         )?
-        .serve_at(PROMPT_PATH, PromptIface)?
+        .serve_at(PROMPT_PATH, PromptIface::new(unlock_prompt.clone()))?
         .serve_at(SESSION_PATH, SessionIface)?
+        .serve_at(PROMPT_BROKER_PATH, PromptBrokerIface::new(broker.clone()))?
         .name(SERVICE_NAME)?
         .build()?;
     tracing::info!("secretsd listening on the session bus as {SERVICE_NAME}");
+
+    broker.set_connection(connection.clone());
+    unlock_prompt.set_connection(connection.clone());
+    // Detects a registered prompt provider's connection closing (a crash,
+    // or any exit without calling `UnregisterProvider` first) — see
+    // `prompt::watcher`.
+    let _prompt_watcher = prompt::watcher::spawn(connection.clone(), broker);
 
     // Populates every vault's `Collection` and every field's `Item` (plus
     // the `"default"` alias) from here on — see `secret_service::refresh`.
