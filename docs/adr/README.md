@@ -23,6 +23,7 @@ by editing the old one. The history is the value.
 
 - [ADR-001](001-dbus-as-the-ipc-mechanism.md) — D-Bus as the IPC mechanism
 - [ADR-002](002-secret-uri-scheme.md) — The `secret://` URI scheme
+  (extended by ADR-018's optional `store@` qualifier)
 - [ADR-003](003-workspace-and-crate-boundaries.md) — Workspace and crate
   boundaries
 - [ADR-004](004-secret-service-compatibility-scope.md) — Secret Service
@@ -32,17 +33,21 @@ by editing the old one. The history is the value.
 - [ADR-006](006-local-backend-cryptography.md) — Local backend cryptography
 - [ADR-007](007-ssh-agent-implementation.md) — SSH agent implementation
 - [ADR-008](008-backend-abstraction-and-roadmap.md) — Backend abstraction
-  and the pluggable-backend roadmap
+  and the pluggable-backend roadmap (its "cannot run two backends at once"
+  limitation lifted by ADR-018)
 - [ADR-009](009-session-and-lock-state-machine.md) — Session and lock state
-  machine
+  machine (superseded in part by ADR-018: locking is per-store, composed
+  daemon-wide)
 - [ADR-010](010-cli-as-thin-dbus-client.md) — The CLI as a thin D-Bus
   client only
 - [ADR-011](011-backend-session-and-authentication-state.md) — Backend
-  session and authentication state
+  session and authentication state (extended by ADR-018: one session per
+  store, not one for "the" backend)
 - [ADR-012](012-1password-desktop-backend.md) — 1Password Desktop backend
 - [ADR-013](013-standard-secret-service-and-extension-namespace.md) —
   Standard Secret Service as the primary contract, `org.secrets.*` as
-  extensions
+  extensions (its object-path scheme and `"default"` alias extended by
+  ADR-018 to a store-nested topology)
 - [ADR-014](014-cli-secret-disclosure-modes.md) — `secrets get`'s output
   modes and terminal disclosure refusal
 - [ADR-015](015-live-secret-service-topology.md) — Live Secret Service
@@ -51,3 +56,6 @@ by editing the old one. The history is the value.
   show` and field-value obfuscation by kind
 - [ADR-017](017-prompt-broker-and-provider-protocol.md) — The prompt
   broker and provider protocol
+- [ADR-018](018-multi-store-support.md) — Multi-store support (supersedes
+  ADR-009's/ADR-013's single-store framing in part; extends ADR-002/
+  ADR-008/ADR-011)

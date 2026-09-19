@@ -121,7 +121,7 @@ Or download a binary for your platform from the
 secretsd &                        # or: systemctl --user enable --now secretsd
 secrets status                    # locked
 secrets unlock                    # prompts for a passphrase
-secrets list                      # Personal, Infrastructure, ...
+secrets list                      # default@Personal, default@Infrastructure, ...
 secrets list Personal             # GitHub
 secrets get secret://Personal/GitHub/password
 secrets lock
@@ -129,11 +129,25 @@ secrets lock
 SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/secrets/ssh-agent.sock ssh-add -L
 ```
 
+With more than one configured store (see [Configuration](#configuration-storeid) below),
+qualify a reference with `store@` whenever a bare vault name would be
+ambiguous, and target one store's own lock with `--store`:
+
+```bash
+secrets stores                    # personal: unlocked
+                                   # work: locked
+secrets unlock --store work
+secrets get secret://work@Personal/GitHub/password
+```
+
 ## Current MVP scope
 
-- One backend: a local, AES-256-GCM-encrypted file
-  (see [`docs/security.md`](docs/security.md)).
-- Two states: locked and unlocked, daemon-wide (no per-vault locking yet).
+- One or more configured *stores* (ADR-018), each one backend instance —
+  a local, AES-256-GCM-encrypted file by default
+  (see [`docs/security.md`](docs/security.md)), or 1Password Desktop.
+- Two states per store: locked and unlocked (no per-vault locking within
+  a store). `secrets lock`/`unlock`/`status` with no `--store` compose
+  over every configured store; pass `--store <id>` to target one.
 - Secret Service compatibility covers the "plain" session algorithm only.
 - `secrets inject`, `secrets run` and `secrets totp` exist as a CLI surface
   (see `secrets --help`) but are not implemented yet.
@@ -149,15 +163,39 @@ Design rationale for every non-obvious decision: [`docs/adr/`](docs/adr/).
 
 The `Backend` trait (`crates/secrets-core/src/backend.rs`) is deliberately
 small so more implementations can be added without touching `secretsd`'s
-D-Bus surface. Two exist today: the local encrypted file (the MVP
-default), and 1Password Desktop, via its native IPC library rather than
-the `op` CLI (`crates/secretsd/src/backend/onepassword/`, selected with
-`[backend] type = "1password"` — see
+D-Bus surface. Two exist today: the local encrypted file (the default),
+and 1Password Desktop, via its native IPC library rather than the `op`
+CLI (`crates/secretsd/src/backend/onepassword/` — see
 [ADR-012](docs/adr/012-1password-desktop-backend.md) and the
 [setup guide](docs/backends/1password.md)). Vaultwarden and
 Bitwarden (API-based) and `pass`/`gopass`/`passage` (GPG- or
 age-encrypted files on disk) are the remaining tracked candidates — see
 `PLAN.md` §7.
+
+### Configuration: `[store.<id>]`
+
+`secretsd` reads `~/.config/secrets/secretsd.toml`. With no file (or a
+file with no `[store.*]` table at all), it runs exactly one implicit
+store, id `default`, backed by the local encrypted file — the zero-config
+case above. More than one store (ADR-018) can be configured at once —
+each `[store.<id>]` table shaped the same way, `<id>` becoming that
+store's name in `secret://` references (`store@vault`) and `secrets
+--store <id>`:
+
+```toml
+[store.personal]
+type = "local"
+
+[store.work]
+type = "1password"
+account_name = "Work"
+```
+
+**Migrating from `[backend]`**: the pre-ADR-018 single `[backend]` table
+is no longer accepted. Rename it to `[store.default]`, keeping every
+other field the same — `default` maps to the same fixed vault file
+(`vault.toml`) the implicit zero-config case already uses, so this rename
+alone changes nothing observable.
 
 ## Documentation
 

@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Accepted. The "exactly one backend active per daemon instance, no
+routing" constraint this ADR cites from ADR-008 is lifted by
+[ADR-018](018-multi-store-support.md): a 1Password store can now be
+configured alongside other stores (another 1Password account, or a local
+vault). Everything else here — the IPC transport choice, field-kind
+heuristic, session/lock design — is unchanged.
 
 ## Context
 

@@ -25,19 +25,25 @@ engineering notes, see
 
 ## Configuration
 
-Add a `[backend]` table to `~/.config/secrets/secretsd.toml` (create the
-file if it does not exist yet):
+Add a `[store.<id>]` table to `~/.config/secrets/secretsd.toml` (create
+the file if it does not exist yet) — `<id>` becomes this store's name in
+`secret://` references and `secrets --store` (see
+[ADR-018](../adr/018-multi-store-support.md)); `default` is a reasonable
+choice if this is your only configured store:
 
 ```toml
-[backend]
+[store.default]
 type = "1password"
 account_name = "my-account"
 ```
 
 `account_name` is required — omitting it is rejected at startup with an
-actionable error (`secrets::daemon::invalid_backend_config`), not a raw
-TOML parse failure. Restart `secretsd` after changing this file: the
-config is only read at startup.
+actionable error (`secrets::daemon::invalid_backend_config`), naming the
+specific `[store.<id>]` it is missing from, not a raw TOML parse failure.
+Restart `secretsd` after changing this file: the config is only read at
+startup. A 1Password store can be configured alongside other stores (a
+local vault, or another 1Password account) — see
+[ADR-018](../adr/018-multi-store-support.md).
 
 ## What you get
 

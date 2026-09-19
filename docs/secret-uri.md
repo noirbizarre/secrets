@@ -15,9 +15,16 @@ those two concerns apart.
 ## Shape
 
 ```text
-secret://<vault>/<item...>/<field>
+secret://[<store>@]<vault>/<item...>/<field>
 ```
 
+- **`<store>@`** — optional. Names which configured *store* (backend
+  instance) the vault lives in — see
+  [ADR-018](adr/018-multi-store-support.md). Omit it and the reference
+  parses exactly as it always has: with one configured store, it always
+  resolves there; with more than one, it resolves wherever the vault name
+  is found, as long as that is unambiguous (see "Store qualification"
+  below).
 - **`<vault>`** — one segment, the vault's name.
 - **`<item...>`** — one or more segments. Most items are a single segment
   (`GitHub`); a vault that organises items in folders uses more
@@ -72,15 +79,51 @@ The parser (`secrets_core::uri::SecretUri::parse`) rejects, with a specific
 error rather than a generic failure:
 
 - a string not starting with `secret://` (case-sensitive)
-- fewer than three `/`-separated components after the scheme (missing
-  item or field)
+- fewer than three `/`-separated components after the scheme and any
+  `store@` qualifier (missing item or field)
 - any component that decodes to the empty string (e.g. a trailing slash,
   or two adjacent slashes)
 - invalid percent-encoding within a component
+- a bare `@` with nothing before it (`secret://@Personal/...`)
+- a store qualifier that decodes but is not a valid store id (ADR-018) —
+  e.g. contains a space
 
 Every error variant is listed in `secrets_core::uri::UriError`, and is
 safe to log or display: a malformed reference cannot itself be a secret's
 *value*, only its name.
+
+## Store qualification
+
+With more than one configured store, an unqualified `<vault>` is resolved
+by asking every store whether it has a vault by that name:
+
+```text
+secret://Personal/GitHub/password           # unqualified
+secret://work@Personal/GitHub/password      # qualified: store "work"
+```
+
+- Found in exactly **one** store: resolves there, exactly as if only that
+  store were configured — the reason a multi-store deployment does not
+  need every reference qualified, only the ones that actually collide.
+- Found in **more than one** store: rejected with
+  `org.secrets.Error.AmbiguousVault`, naming every matching store — never
+  a silent guess. Qualify the reference to pick one:
+  `secret://<store>@Personal/...`.
+- Found in **no** store: the usual `NotFound`.
+
+A literal `@` in a vault name must be percent-encoded (`%40`) so it is not
+read as the store separator — the same escaping rule this page's
+"Escaping" section already applies to a literal `/`. The `<store>@`
+detection only ever looks at the *first* segment, so an `@` inside an
+item or field name is never affected:
+`secret://Personal/user@host/password` is vault `Personal`, item
+`user@host`, with no store qualifier at all.
+
+`org.secrets.Manager.ListVaults` always returns fully `store@vault`-
+qualified names (even with a single configured store), so its output is
+always ready to use as a qualifier or paste into a `secret://` reference.
+`Manager.ListItems`'s `vault` argument, and `secrets list`'s own, accept
+the same optional `store@` prefix.
 
 ## Item-level references
 

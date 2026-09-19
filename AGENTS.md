@@ -29,10 +29,19 @@ checks is a comment, and it will be violated.
 2. **`secrets-cli` holds no vault or session state** — every command in
    `crates/secrets-cli/src/lib.rs` goes through `secrets_client::SecretsClient`
    (aliased `Client` there), never reads a vault file. See ADR-010.
-3. **Locking is daemon-wide and lives in exactly one place**
-   (`secretsd::state::DaemonState`) — every interface (`org.secrets.Manager`,
-   the Secret Service objects, the SSH agent) reads the same
-   `is_unlocked()`, never its own copy. See ADR-009.
+3. **Locking is authoritative in exactly one place,
+   `secretsd::state::DaemonState`, per store** — every interface
+   (`org.secrets.Manager`, the Secret Service objects, the SSH agent)
+   reads the same `DaemonState::is_unlocked(store)` for a given store,
+   never its own copy, and never a second daemon-wide boolean. A
+   daemon-wide `secrets lock`/`unlock` with no store argument is
+   `DaemonState`'s own explicit composition over every configured store
+   (`lock_all`/`unlock_default`), not a second lock beside the per-store
+   ones. See ADR-009 and ADR-018. Enforced by
+   `secretsd::state::tests::locking_one_store_does_not_affect_another`
+   and `secretsd::secret_service::service::tests::
+   search_items_reports_matches_as_locked_when_the_backend_session_requires_authentication`-
+   style per-store tests.
 4. **`SecretValue`/`VaultKey` are `Zeroize`/`ZeroizeOnDrop`** — a plaintext
    value's lifetime is bounded by its owner's scope, not left to the
    allocator. See `docs/security.md`.

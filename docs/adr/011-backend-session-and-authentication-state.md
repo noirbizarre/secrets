@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. Extended by [ADR-018](018-multi-store-support.md):
+`DaemonState` now holds one `BackendSession` per store rather than one for
+"the" backend; the `BackendStatus`/`BackendSession` contract itself is
+unchanged.
 
 ## Context
 

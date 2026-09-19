@@ -115,6 +115,12 @@ This file is plain markdown, not rendered by `rust.tpl`.
       Secret Service topology: a background scan reconciles
       `Collection`/`Item` objects instead of a fixed, fatal, one-shot scan
       at startup; supersedes ADR-004's "fixed at startup" framing only
+- [x] 3.16 [ADR-018](docs/adr/018-multi-store-support.md) — Multi-store
+      support: `StoreId`, an optional `store@` URI qualifier, `[store.
+      <id>]` config replacing `[backend]`, per-store locking composed
+      daemon-wide, and store-nested Secret Service object paths;
+      supersedes ADR-009's/ADR-013's single-store framing in part, extends
+      ADR-002/ADR-008/ADR-011 (issues #24/#25)
 
 ## 4. `secrets-core` (domain/core library)
 
@@ -143,6 +149,13 @@ This file is plain markdown, not rendered by `rust.tpl`.
       wire-level contract (see
       [ADR-017](docs/adr/017-prompt-broker-and-provider-protocol.md),
       issue #21)
+- [x] 4.10 `StoreId` (`store_id.rs`); the optional `store@` URI qualifier
+      on `SecretUri`/`ItemUri`; `CoreError::AmbiguousVault`/
+      `StoreNotFound`/`StoreSelectionRequired` and an optional `StoreId`
+      on `VaultLocked`/`NotFound`/`ItemNotFound`/`PermissionDenied`;
+      `ManagerError`/`Manager` proxy additions (`ListStores`/
+      `StatusStore`/`UnlockStore`/`LockStore`) — see
+      [ADR-018](docs/adr/018-multi-store-support.md), issues #24/#25
 
 ## 5. `secretsd` (daemon)
 
@@ -189,6 +202,17 @@ This file is plain markdown, not rendered by `rust.tpl`.
       `main.rs`). See
       [ADR-017](docs/adr/017-prompt-broker-and-provider-protocol.md),
       issue #21
+- [x] 5.12 Multi-store support: `config.rs`'s `[store.<id>]` keyed
+      collection replacing `[backend]` (with an actionable rejection for
+      the removed shape); `DaemonState` as a `BTreeMap<StoreId,
+      StoreEntry>` registry, each with its own `LockController`/
+      `BackendSession`, ambiguity-resolved unqualified lookups, and
+      `unlock_default`/`lock_all`/`status_summary` composing the
+      daemon-wide `Manager.Unlock`/`Lock`/`Status` over every store;
+      `secret_service`'s object paths/topology/`"default"` alias
+      store-nested; the SSH agent aggregating identities across every
+      accessible store — see
+      [ADR-018](docs/adr/018-multi-store-support.md), issues #24/#25
 
 ## 6. `secrets-cli`
 
@@ -207,6 +231,9 @@ This file is plain markdown, not rendered by `rust.tpl`.
       secret-shaped values obfuscated server-side; requires unlock, no
       terminal-disclosure refusal (unlike `get`) — see
       [ADR-016](docs/adr/016-show-command-and-field-value-obfuscation.md)
+- [x] 6.8 `--store` on `list`/`lock`/`unlock`/`status`, and a new `secrets
+      stores` command listing every configured store and its status — see
+      [ADR-018](docs/adr/018-multi-store-support.md)
 
 ## 7. Backends
 
@@ -215,7 +242,9 @@ This file is plain markdown, not rendered by `rust.tpl`.
 - [ ] 7.3 [Future] Bitwarden
 - [x] 7.4 1Password Desktop, via its native IPC library (not the `op`
       CLI) — `crates/secretsd/src/backend/onepassword/`, selected via
-      `[backend] type = "1password"` in `secretsd.toml`. See
+      `[store.<id>] type = "1password"` in `secretsd.toml` (see
+      [ADR-018](docs/adr/018-multi-store-support.md), which replaced the
+      original single `[backend]` table). See
       [ADR-012](docs/adr/012-1password-desktop-backend.md) and
       `docs/architecture/1password-poc-results.md` for the investigation
       and validation this is built on. TOTP/SSH-specific behavior
