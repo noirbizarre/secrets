@@ -32,7 +32,7 @@ aes-gcm = "0.11.1"
 argon2 = "0.6.0"
 base64 = "0.23.1"
 dirs = "7.0.0"
-libloading = "0.8.9"
+libloading = "0.9.0"
 miette = { version = "7.6.0", features = ["fancy"] }
 pgp = "0.20.0"
 rand_core = { version = "0.6", features = ["getrandom"] }
