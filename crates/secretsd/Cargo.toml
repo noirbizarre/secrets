@@ -62,5 +62,5 @@ pretty_assertions = "1.4.1"
 # is generic over `rand::Rng + rand::CryptoRng` (`rand` 0.8, matching
 # the version `pgp` itself depends on) — never used by non-test code.
 rand = "0.8"
-rstest = "0.26.1"
+rstest = "0.27.0"
 tempfile = "3.27.0"
