@@ -659,6 +659,34 @@ fn build_store_entry(id: &StoreId, kind: crate::config::BackendKind) -> Result<S
                 session: None,
             })
         }
+        crate::config::BackendKind::Pass {
+            store_dir,
+            secret_key_path,
+            vault,
+        } => {
+            let store_dir = match store_dir {
+                Some(store_dir) => store_dir,
+                None => crate::paths::default_pass_store_dir()?,
+            };
+            let pass = Arc::new(crate::backend::pass::PassBackend::open(
+                store_dir,
+                &secret_key_path,
+                vault,
+            )?);
+            let backend: Arc<dyn Backend> = pass.clone();
+            let lock_controller: Arc<dyn LockController> = pass;
+            // A real, passphrase-backed lock — the configured secret
+            // key's passphrase, cached until `lock()`/drop (ADR-019),
+            // mirroring `LocalBackend`'s own precedent for a backend
+            // whose "unlock" is a real daemon-owned secret, not an
+            // external session (contrast the 1Password arm below).
+            Ok(StoreEntry {
+                backend,
+                lock_controller,
+                has_real_lock: true,
+                session: None,
+            })
+        }
         crate::config::BackendKind::OnePassword { account_name } => {
             let one_password = Arc::new(
                 crate::backend::onepassword::OnePasswordBackend::open(account_name).map_err(

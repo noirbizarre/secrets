@@ -144,7 +144,8 @@ secrets get secret://work@Personal/GitHub/password
 
 - One or more configured *stores* (ADR-018), each one backend instance —
   a local, AES-256-GCM-encrypted file by default
-  (see [`docs/security.md`](docs/security.md)), or 1Password Desktop.
+  (see [`docs/security.md`](docs/security.md)), 1Password Desktop, or a
+  `pass`/`gopass`-compatible store directory.
 - Two states per store: locked and unlocked (no per-vault locking within
   a store). `secrets lock`/`unlock`/`status` with no `--store` compose
   over every configured store; pass `--store <id>` to target one.
@@ -163,14 +164,18 @@ Design rationale for every non-obvious decision: [`docs/adr/`](docs/adr/).
 
 The `Backend` trait (`crates/secrets-core/src/backend.rs`) is deliberately
 small so more implementations can be added without touching `secretsd`'s
-D-Bus surface. Two exist today: the local encrypted file (the default),
-and 1Password Desktop, via its native IPC library rather than the `op`
+D-Bus surface. Three exist today: the local encrypted file (the default),
+1Password Desktop, via its native IPC library rather than the `op`
 CLI (`crates/secretsd/src/backend/onepassword/` — see
 [ADR-012](docs/adr/012-1password-desktop-backend.md) and the
-[setup guide](docs/backends/1password.md)). Vaultwarden and
-Bitwarden (API-based) and `pass`/`gopass`/`passage` (GPG- or
-age-encrypted files on disk) are the remaining tracked candidates — see
-`PLAN.md` §7.
+[setup guide](docs/backends/1password.md)), and `pass`/`gopass`-compatible
+store directories, decrypted in-process via a pure-Rust OpenPGP
+implementation rather than shelling out to `gpg`/`pass`/`gopass`
+(`crates/secretsd/src/backend/pass/` — see
+[ADR-019](docs/adr/019-pass-backend.md) and the
+[setup guide](docs/backends/pass.md)). Vaultwarden, Bitwarden (API-based)
+and `passage` (age-encrypted files on disk) are the remaining tracked
+candidates — see `PLAN.md` §7.
 
 ### Configuration: `[store.<id>]`
 
@@ -189,6 +194,11 @@ type = "local"
 [store.work]
 type = "1password"
 account_name = "Work"
+
+[store.gopass-mount]
+type = "pass"
+secret_key_path = "/home/you/.config/secrets/pass-key.asc"
+store_dir = "/home/you/.local/share/gopass/stores/root"
 ```
 
 **Migrating from `[backend]`**: the pre-ADR-018 single `[backend]` table
@@ -202,6 +212,7 @@ alone changes nothing observable.
 <https://noirbizarre.github.io/secrets/>
 
 - [1Password Desktop backend setup](docs/backends/1password.md)
+- [`pass`/`gopass` backend setup](docs/backends/pass.md)
 - [`secret://` URI scheme](docs/secret-uri.md)
 - [Architecture overview](docs/architecture/overview.md)
 - [External clients (GTK, TUI, browser)](docs/architecture/external-clients.md)

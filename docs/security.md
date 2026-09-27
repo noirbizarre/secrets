@@ -149,6 +149,21 @@ its password is.
   see "Memory hygiene" above), so a copy of that buffer exists,
   un-zeroized, for the duration of one native call and one parse. See
   `crates/secretsd/src/backend/onepassword/backend.rs`'s `list_items`.
+- **The `pass` backend's `list_items` decrypts each item's full entry to
+  report field metadata, the same class of "metadata isn't separate from
+  values" limitation the 1Password backend has, for a different reason:
+  `pass`'s file format has no metadata channel at all.** Every field
+  value this backend's own code touches — the entry's whole decrypted
+  plaintext, and each individual parsed field — is explicitly zeroized
+  before `list_items`/`get_field` return (see `crates/secretsd/src/
+  backend/pass/backend.rs`), and `list_items` never returns any value.
+  What is *not* under this project's control: rPGP's own internal
+  decryption buffers (the `Message`/packet-reader machinery between
+  ciphertext and `as_data_string()`) are not documented as
+  `Zeroize`/`ZeroizeOnDrop`, so a transient, un-zeroized copy of a
+  decrypted entry's plaintext may exist briefly inside the `pgp` crate
+  itself during every decrypt call, the same shape of residual exposure
+  as the 1Password backend's raw IPC buffer above.
 
 ## Reporting a vulnerability
 

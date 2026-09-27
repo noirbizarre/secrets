@@ -31,8 +31,10 @@ path = "src/main.rs"
 aes-gcm = "0.11.1"
 argon2 = "0.6.0"
 base64 = "0.23.1"
+dirs = "7.0.0"
 libloading = "0.8.9"
 miette = { version = "7.6.0", features = ["fancy"] }
+pgp = "0.20.0"
 rand_core = { version = "0.6", features = ["getrandom"] }
 secrets-core = { version = "0.1.0", path = "../secrets-core" }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -55,5 +57,10 @@ zeroize = { version = "1.9.0", features = ["derive"] }
 # clean shutdown — `std::process::Child::kill()` only offers `SIGKILL`.
 libc = "0.2.189"
 pretty_assertions = "1.4.1"
+# Only for the `pass` backend's own tests: generating an ephemeral
+# OpenPGP keypair in-process via `pgp`'s own key-generation API, which
+# is generic over `rand::Rng + rand::CryptoRng` (`rand` 0.8, matching
+# the version `pgp` itself depends on) — never used by non-test code.
+rand = "0.8"
 rstest = "0.26.1"
 tempfile = "3.27.0"

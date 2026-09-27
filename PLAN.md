@@ -250,8 +250,14 @@ This file is plain markdown, not rendered by `rust.tpl`.
       and validation this is built on. TOTP/SSH-specific behavior
       deliberately not implemented here (Secrets-level concerns, see the
       ADR).
-- [ ] 7.5 [Future] `pass`
-- [ ] 7.6 [Future] `gopass`
+- [x] 7.5 `pass` (Password Store), decrypted in-process via rPGP (not the
+      `gpg`/`pass` CLI) — `crates/secretsd/src/backend/pass/`, selected
+      via `[store.<id>] type = "pass"` in `secretsd.toml`. See
+      [ADR-019](docs/adr/019-pass-backend.md) and
+      [`docs/backends/pass.md`](docs/backends/pass.md).
+- [x] 7.6 `gopass` — no dedicated backend needed: disk-compatible with
+      `pass`, each mount configured as its own `[store.<id>]` instance
+      (see [ADR-019](docs/adr/019-pass-backend.md)).
 - [ ] 7.7 [Future] `passage`
 
 ## 8. Security

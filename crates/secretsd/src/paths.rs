@@ -62,3 +62,27 @@ pub fn ssh_agent_socket() -> Result<PathBuf> {
     xdg.place_runtime_file(SSH_AGENT_SOCKET_NAME)
         .map_err(|error| DaemonError::XdgUnavailable(error.to_string()))
 }
+
+/// `pass`'s own default store location, used when `[store.<id>] type =
+/// "pass"` omits `store_dir` — not an XDG path (`pass` predates the XDG
+/// convention and has never followed it), so this is deliberately
+/// `$HOME`-relative, not `xdg`-crate-derived like every other path in
+/// this module.
+///
+/// # Errors
+///
+/// Returns [`DaemonError::BackendUnavailable`] if the home directory
+/// cannot be determined (no `$HOME`, no known passwd entry) — the same
+/// failure-at-startup treatment `PassBackend::open` already gives a
+/// misconfigured or missing store path.
+pub fn default_pass_store_dir() -> Result<PathBuf> {
+    dirs::home_dir()
+        .map(|home| home.join(".password-store"))
+        .ok_or_else(|| {
+            DaemonError::BackendUnavailable(
+                "could not determine the home directory for the default pass store location \
+                 ($HOME); set store_dir explicitly instead"
+                    .to_string(),
+            )
+        })
+}

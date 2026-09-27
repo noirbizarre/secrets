@@ -104,6 +104,34 @@ pub enum DaemonError {
     #[error("more than one store needs this operation ({0}); use the store-scoped method")]
     #[diagnostic(code(secrets::daemon::store_selection_required))]
     StoreSelectionRequired(String),
+
+    /// `[store.<id>] type = "pass"`'s `secret_key_path` does not exist,
+    /// or does not contain a valid ascii-armored OpenPGP secret key.
+    ///
+    /// Carries only the path and a description, never key material —
+    /// same discipline as [`DaemonError::VaultFileUnreadable`].
+    #[error("could not read secret key at {path}: {reason}")]
+    #[diagnostic(
+        code(secrets::daemon::secret_key_unreadable),
+        help("export one with `gpg --export-secret-keys --armor <key-id> > key.asc`")
+    )]
+    SecretKeyUnreadable {
+        /// The configured secret key file's path.
+        path: std::path::PathBuf,
+        /// What went wrong, in human terms.
+        reason: String,
+    },
+
+    /// The supplied passphrase did not unlock a `pass`-backend store's
+    /// configured secret key.
+    ///
+    /// Distinct wording from [`DaemonError::IncorrectPassphrase`] (which
+    /// is specifically about `LocalBackend`'s vault file) so the message
+    /// names the right thing — never says more than that, for the same
+    /// reason `IncorrectPassphrase` doesn't.
+    #[error("incorrect key passphrase, or the secret key file is corrupted")]
+    #[diagnostic(code(secrets::daemon::incorrect_key_passphrase))]
+    IncorrectKeyPassphrase,
 }
 
 /// The daemon's result alias.
