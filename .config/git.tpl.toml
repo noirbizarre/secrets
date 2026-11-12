@@ -7,9 +7,7 @@
 source = "https://github.com/noirbizarre/rust.tpl"
 
 [answers]
-aur = false
 author = "Axel H. <noirbizarre@gmail.com>"
-bin_name = "secrets"
 categories = "command-line-utilities,authentication"
 copyright_holder = "Axel H."
 copyright_year = 2026
@@ -17,18 +15,11 @@ crate = "secrets"
 description = "Local-first secret broker and secret manager for Linux desktops"
 docs = true
 docs_accent = "indigo"
-homebrew = false
-homebrew_tap = "noirbizarre/homebrew-tap"
+gh_ship_token_mode = "app"
 keywords = "secrets,dbus,ssh-agent,password-manager,linux"
-man_pages = false
+kind = "workspace"
+mbx = false
 msrv = true
 msrv_version = "1.88"
 owner = "noirbizarre"
 publish = false
-targets = [
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-unknown-linux-musl",
-    "aarch64-unknown-linux-musl",
-]
-workspace = true

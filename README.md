@@ -112,7 +112,7 @@ and the documentation treats them as such.
 
 ## Installation
 
-Or download a binary for your platform from the
+Download a binary for your platform from the
 [latest release](https://github.com/noirbizarre/secrets/releases/latest).
 
 ## Usage

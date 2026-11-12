@@ -1,6 +1,7 @@
 name: 📚 Documentation
 
 on:
+  pull_request:
   push:
     branches: [main]
     paths:
@@ -9,26 +10,16 @@ on:
       - .github/workflows/docs.yaml
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-# Only one deployment at a time; never cancel one midway.
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
 jobs:
   build:
-    name: 🏗️ Build
+    name: 📝 Build documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       # uv is pinned by mise.lock, so the docs build uses the same version
       # as `mise run docs:build` locally.
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
         with:
           cache: true
 
@@ -36,15 +27,23 @@ jobs:
         run: mise run docs:build
 
       - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
         with:
           path: site
 
   deploy:
-    name: 🚀 Deploy
+    name: 🌐 Publish documentation
+    # Preserve the project's public-only deployment policy while building PRs.
+    if: github.event_name != 'pull_request' && github.event.repository.visibility == 'public'
     needs: build
     runs-on: ubuntu-latest
-    # Pages deployments are only allowed from public repositories, so we skip this job for private repos.
-    if: github.event.repository.visibility == 'public'
+    permissions:
+      pages: write
+      id-token: write
+    # Only one deployment at a time; never cancel one midway.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
