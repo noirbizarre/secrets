@@ -34,12 +34,12 @@ env:
 
 jobs:
   build:
-    name: 🏗️ ${{ matrix.target }}
+    name: 🏗️ Build (${{ matrix.build.asset }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
+        build:
           - { target: x86_64-unknown-linux-gnu, asset: linux-amd64 }
           - { target: aarch64-unknown-linux-gnu, asset: linux-arm64 }
           - { target: x86_64-unknown-linux-musl, asset: linux-amd64-musl }
@@ -53,26 +53,26 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.build.target }}
       - uses: Swatinem/rust-cache@v2
 
       # cross supplies both the target linker and the vendored C build toolchain.
       - uses: taiki-e/install-action@cross
 
       - name: Build
-        run: cross build --release --locked --target ${{ matrix.target }}
+        run: cross build --release --locked --target ${{ matrix.build.target }}
 
       - name: Stage the asset
         run: |
           # Accept both bare tags and full tag refs without introducing path separators.
           tag="${RELEASE_REF#refs/tags/}"
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/secrets" \
-             "dist/secrets_${tag}_${{ matrix.asset }}"
+          cp "target/${{ matrix.build.target }}/release/secrets" \
+             "dist/secrets_${tag}_${{ matrix.build.asset }}"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: asset-${{ matrix.asset }}
+          name: asset-${{ matrix.build.asset }}
           path: dist/*
           if-no-files-found: error
 
