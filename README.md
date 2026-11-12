@@ -112,7 +112,8 @@ and the documentation treats them as such.
 
 ## Installation
 
-<!-- List the member crates and how to install each of them. -->
+Download a binary for your platform from the
+[latest release](https://github.com/noirbizarre/secrets/releases/latest).
 
 ## Usage
 
