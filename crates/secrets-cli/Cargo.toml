@@ -48,6 +48,6 @@ assert_cmd = "2.2.2"
 escargot = "0.5.15"
 predicates = "3.1.4"
 pretty_assertions = "1.4.1"
-rstest = "0.27.0"
+rstest = "0.28.0"
 secretsd = { version = "0.1.0", path = "../secretsd" }
 tempfile = "3.27.0"
